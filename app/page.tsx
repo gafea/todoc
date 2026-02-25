@@ -1,65 +1,382 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useEffect } from "react";
+import { Check, Trash2, Plus, Pencil, Save, X } from "lucide-react";
+
+interface Todo {
+  id: string;
+  text: string;
+  description: string;
+  completed: boolean;
+  dueAt: string | null;
+  createdAt: number;
+}
+
+const getNowDateTimeLocal = () => {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return now.toISOString().slice(0, 16);
+};
+
+const sortTodos = (items: Todo[]) => {
+  return [...items].sort((first, second) => {
+    if (!first.dueAt && !second.dueAt) {
+      return first.createdAt - second.createdAt;
+    }
+    if (!first.dueAt) {
+      return -1;
+    }
+    if (!second.dueAt) {
+      return 1;
+    }
+    return new Date(first.dueAt).getTime() - new Date(second.dueAt).getTime();
+  });
+};
 
 export default function Home() {
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [inputValue, setInputValue] = useState("");
+  const [descriptionValue, setDescriptionValue] = useState("");
+  const [shouldSetDateTime, setShouldSetDateTime] = useState(true);
+  const [dateTimeValue, setDateTimeValue] = useState(getNowDateTimeLocal());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editShouldSetDateTime, setEditShouldSetDateTime] = useState(true);
+  const [editDateTime, setEditDateTime] = useState(getNowDateTimeLocal());
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    const savedTodos = localStorage.getItem("todos");
+    if (savedTodos) {
+      try {
+        const parsedTodos = JSON.parse(savedTodos) as Partial<Todo>[];
+        const normalizedTodos: Todo[] = parsedTodos.map((todo, index) => ({
+          id: todo.id ?? crypto.randomUUID(),
+          text: todo.text ?? "",
+          description: todo.description ?? "",
+          completed: Boolean(todo.completed),
+          dueAt: todo.dueAt ?? null,
+          createdAt: todo.createdAt ?? Date.now() + index,
+        }));
+        setTodos(normalizedTodos);
+      } catch (e) {
+        console.error("Failed to parse todos from local storage", e);
+      }
+    }
+    setIsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (isLoaded) {
+      localStorage.setItem("todos", JSON.stringify(todos));
+    }
+  }, [todos, isLoaded]);
+
+  const addTodo = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputValue.trim()) return;
+
+    const nowIso = getNowDateTimeLocal();
+    const selectedDueAt = shouldSetDateTime
+      ? dateTimeValue < nowIso
+        ? nowIso
+        : dateTimeValue
+      : null;
+
+    const newTodo: Todo = {
+      id: crypto.randomUUID(),
+      text: inputValue.trim(),
+      description: descriptionValue.trim(),
+      completed: false,
+      dueAt: selectedDueAt,
+      createdAt: Date.now(),
+    };
+
+    setTodos([...todos, newTodo]);
+    setInputValue("");
+    setDescriptionValue("");
+    setShouldSetDateTime(true);
+    setDateTimeValue(getNowDateTimeLocal());
+  };
+
+  const toggleTodo = (id: string) => {
+    setTodos(
+      todos.map((todo) =>
+        todo.id === id ? { ...todo, completed: !todo.completed } : todo
+      )
+    );
+  };
+
+  const deleteTodo = (id: string) => {
+    setTodos(todos.filter((todo) => todo.id !== id));
+  };
+
+  const startEditingTodo = (todo: Todo) => {
+    setEditingId(todo.id);
+    setEditText(todo.text);
+    setEditDescription(todo.description);
+    setEditShouldSetDateTime(Boolean(todo.dueAt));
+    setEditDateTime(todo.dueAt ?? getNowDateTimeLocal());
+  };
+
+  const cancelEditingTodo = () => {
+    setEditingId(null);
+    setEditText("");
+    setEditDescription("");
+    setEditShouldSetDateTime(true);
+    setEditDateTime(getNowDateTimeLocal());
+  };
+
+  const saveEditingTodo = (id: string) => {
+    if (!editText.trim()) return;
+
+    const nowIso = getNowDateTimeLocal();
+    const selectedDueAt = editShouldSetDateTime
+      ? editDateTime < nowIso
+        ? nowIso
+        : editDateTime
+      : null;
+
+    setTodos(
+      todos.map((todo) =>
+        todo.id === id
+          ? {
+              ...todo,
+              text: editText.trim(),
+              description: editDescription.trim(),
+              dueAt: selectedDueAt,
+            }
+          : todo
+      )
+    );
+    cancelEditingTodo();
+  };
+
+  if (!isLoaded) {
+    return null;
+  }
+
+  const completedCount = todos.filter((t) => t.completed).length;
+  const sortedTodos = sortTodos(todos);
+  const minDateTime = getNowDateTimeLocal();
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 py-12 px-4 sm:px-6 lg:px-8 font-sans text-zinc-900 dark:text-zinc-100 flex justify-center items-start">
+      <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+        <div className="p-6">
+          <h1 className="text-2xl font-bold mb-6 text-center">Todo List</h1>
+
+          <form onSubmit={addTodo} className="space-y-3 mb-6">
+            <input
+              type="text"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder="What needs to be done?"
+              className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 transition-shadow"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+            <textarea
+              value={descriptionValue}
+              onChange={(e) => setDescriptionValue(e.target.value)}
+              placeholder="Description (optional)"
+              rows={2}
+              className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 transition-shadow resize-none"
+            />
+
+            <label className="flex items-center justify-between text-sm text-zinc-600 dark:text-zinc-300">
+              <span>Set date & time</span>
+              <button
+                type="button"
+                onClick={() => setShouldSetDateTime((value) => !value)}
+                aria-label="Toggle datetime"
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  shouldSetDateTime
+                    ? "bg-blue-600 dark:bg-blue-500"
+                    : "bg-zinc-300 dark:bg-zinc-700"
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                    shouldSetDateTime ? "translate-x-5" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </label>
+
+            {shouldSetDateTime && (
+              <input
+                type="datetime-local"
+                value={dateTimeValue}
+                onChange={(e) => setDateTimeValue(e.target.value)}
+                min={minDateTime}
+                className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 transition-shadow"
+              />
+            )}
+
+            <button
+              type="submit"
+              disabled={!inputValue.trim()}
+              className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 dark:bg-blue-500 dark:hover:bg-blue-600 dark:disabled:bg-blue-800 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+            >
+              <Plus size={18} />
+              Add Todo
+            </button>
+          </form>
+
+          <div className="space-y-3">
+            {todos.length === 0 ? (
+              <p className="text-center text-zinc-500 dark:text-zinc-400 py-4">
+                No tasks yet. Add one above!
+              </p>
+            ) : (
+              sortedTodos.map((todo) => (
+                <div
+                  key={todo.id}
+                  className={`p-3 rounded-lg border transition-all ${
+                    todo.completed
+                      ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800"
+                      : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 shadow-sm"
+                  }`}
+                >
+                  {editingId === todo.id ? (
+                    <div className="space-y-3">
+                      <input
+                        type="text"
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <textarea
+                        value={editDescription}
+                        onChange={(e) => setEditDescription(e.target.value)}
+                        rows={2}
+                        placeholder="Description (optional)"
+                        className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                      />
+                      <label className="flex items-center justify-between text-sm text-zinc-600 dark:text-zinc-300">
+                        <span>Set date & time</span>
+                        <button
+                          type="button"
+                          onClick={() => setEditShouldSetDateTime((value) => !value)}
+                          aria-label="Toggle edit datetime"
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            editShouldSetDateTime
+                              ? "bg-blue-600 dark:bg-blue-500"
+                              : "bg-zinc-300 dark:bg-zinc-700"
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                              editShouldSetDateTime ? "translate-x-5" : "translate-x-1"
+                            }`}
+                          />
+                        </button>
+                      </label>
+                      {editShouldSetDateTime && (
+                        <input
+                          type="datetime-local"
+                          value={editDateTime}
+                          onChange={(e) => setEditDateTime(e.target.value)}
+                          min={minDateTime}
+                          className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      )}
+                      <div className="flex gap-2 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => cancelEditingTodo()}
+                          className="px-3 py-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                        >
+                          <X size={18} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => saveEditingTodo(todo.id)}
+                          disabled={!editText.trim()}
+                          className="px-3 py-2 text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 rounded-md"
+                        >
+                          <Save size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-3 flex-1 overflow-hidden">
+                          <button
+                            onClick={() => toggleTodo(todo.id)}
+                            className={`flex-shrink-0 w-6 h-6 rounded-full border flex items-center justify-center transition-colors ${
+                              todo.completed
+                                ? "bg-green-500 border-green-500 text-white"
+                                : "border-zinc-300 dark:border-zinc-600 hover:border-green-500 dark:hover:border-green-400"
+                            }`}
+                          >
+                            {todo.completed && <Check size={14} strokeWidth={3} />}
+                          </button>
+                          <span
+                            className={`truncate transition-all ${
+                              todo.completed
+                                ? "text-zinc-400 dark:text-zinc-500 line-through"
+                                : "text-zinc-700 dark:text-zinc-200"
+                            }`}
+                          >
+                            {todo.text}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => startEditingTodo(todo)}
+                            className="p-2 text-zinc-400 hover:text-blue-500 dark:hover:text-blue-400 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                            aria-label="Edit todo"
+                          >
+                            <Pencil size={17} />
+                          </button>
+                          <button
+                            onClick={() => deleteTodo(todo.id)}
+                            className="p-2 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 transition-colors rounded-md hover:bg-red-50 dark:hover:bg-red-950/30"
+                            aria-label="Delete todo"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {todo.description && (
+                        <p className="text-sm text-zinc-500 dark:text-zinc-400 pl-9 break-words">
+                          {todo.description}
+                        </p>
+                      )}
+
+                      {todo.dueAt && (
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 pl-9">
+                          {new Date(todo.dueAt).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
         </div>
-      </main>
+
+        {todos.length > 0 && (
+          <div className="bg-zinc-50 dark:bg-zinc-950/50 px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 flex justify-between items-center text-sm text-zinc-500 dark:text-zinc-400">
+            <span>
+              {completedCount} of {todos.length} completed
+            </span>
+            {completedCount > 0 && (
+              <button
+                onClick={() => setTodos(todos.filter((t) => !t.completed))}
+                className="hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors"
+              >
+                Clear completed
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
