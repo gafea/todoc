@@ -3,8 +3,7 @@ const normalizeOrigin = (value: string) => value.replace(/\/+$/, "");
 const resolveBaseUrl = () => {
   const candidate =
     process.env.APP_BASE_URL ||
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.EXPECTED_ORIGIN;
+    process.env.NEXT_PUBLIC_APP_URL;
 
   if (!candidate) {
     throw new Error(
@@ -16,9 +15,7 @@ const resolveBaseUrl = () => {
 };
 
 const baseUrl = resolveBaseUrl();
-const expectedOrigin = normalizeOrigin(
-  (process.env.EXPECTED_ORIGIN || baseUrl).trim(),
-);
+const expectedOrigin = normalizeOrigin(baseUrl.trim());
 
 const deriveRpId = () => {
   if (process.env.RP_ID) {

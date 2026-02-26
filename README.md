@@ -29,6 +29,6 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 
 ## Environment Notes
 
-- `APP_BASE_URL` and `EXPECTED_ORIGIN` should match the app origin used in browser.
+- `APP_BASE_URL` should match the app origin used in browser.
 - `RP_ID` is usually `localhost` in local development.
 - `SECRET_COOKIE_PASSWORD` must be at least 32 characters.
