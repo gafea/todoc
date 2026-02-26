@@ -13,6 +13,10 @@ model User {
   credentials  Credential[]
   ownedTodos   Todo[]       @relation("OwnerTodos")
   sharedTodos  Todo[]       @relation("SharedTodos")
+  initiatedCalls CallSession[] @relation("CallInitiator")
+  receivedCalls  CallSession[] @relation("CallRecipient")
+  sentSignals    CallSignal[]  @relation("CallSignalSender")
+  receivedSignals CallSignal[] @relation("CallSignalRecipient")
 }
 
 model Credential {
@@ -37,7 +41,44 @@ model Todo {
   owner            User      @relation("OwnerTodos", fields: [ownerId], references: [id], onDelete: Cascade)
   sharedWithUserId String?
   sharedWith       User?     @relation("SharedTodos", fields: [sharedWithUserId], references: [id], onDelete: SetNull)
+  callSession      CallSession?
 
   @@index([ownerId])
   @@index([sharedWithUserId])
+}
+
+model CallSession {
+  id            String       @id @default(cuid())
+  todoId         String       @unique
+  todo           Todo         @relation(fields: [todoId], references: [id], onDelete: Cascade)
+  initiatorUserId String
+  initiator      User         @relation("CallInitiator", fields: [initiatorUserId], references: [id], onDelete: Cascade)
+  recipientUserId String
+  recipient      User         @relation("CallRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  status         String       @default("active")
+  startedAt      DateTime     @default(now())
+  endedAt        DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  signals        CallSignal[]
+
+  @@index([initiatorUserId])
+  @@index([recipientUserId])
+  @@index([status])
+}
+
+model CallSignal {
+  id           String      @id @default(cuid())
+  callSessionId String
+  callSession  CallSession @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  fromUserId   String
+  fromUser     User        @relation("CallSignalSender", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUserId     String
+  toUser       User        @relation("CallSignalRecipient", fields: [toUserId], references: [id], onDelete: Cascade)
+  payload      String
+  createdAt    DateTime    @default(now())
+  deliveredAt  DateTime?
+
+  @@index([callSessionId])
+  @@index([toUserId, deliveredAt])
 }
