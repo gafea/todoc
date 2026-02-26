@@ -8,22 +8,11 @@ import {
   startCallForTodo,
   type CallSessionPayload,
 } from "@/lib/call-client";
-import { fetchTodos, TodoItem } from "@/lib/todo-client";
-
-const monthColorClasses = [
-  "border-blue-300 dark:border-blue-700 bg-blue-50/70 dark:bg-blue-950/30",
-  "border-emerald-300 dark:border-emerald-700 bg-emerald-50/70 dark:bg-emerald-950/30",
-  "border-violet-300 dark:border-violet-700 bg-violet-50/70 dark:bg-violet-950/30",
-  "border-amber-300 dark:border-amber-700 bg-amber-50/70 dark:bg-amber-950/30",
-  "border-rose-300 dark:border-rose-700 bg-rose-50/70 dark:bg-rose-950/30",
-  "border-cyan-300 dark:border-cyan-700 bg-cyan-50/70 dark:bg-cyan-950/30",
-  "border-lime-300 dark:border-lime-700 bg-lime-50/70 dark:bg-lime-950/30",
-  "border-fuchsia-300 dark:border-fuchsia-700 bg-fuchsia-50/70 dark:bg-fuchsia-950/30",
-  "border-orange-300 dark:border-orange-700 bg-orange-50/70 dark:bg-orange-950/30",
-  "border-sky-300 dark:border-sky-700 bg-sky-50/70 dark:bg-sky-950/30",
-  "border-teal-300 dark:border-teal-700 bg-teal-50/70 dark:bg-teal-950/30",
-  "border-indigo-300 dark:border-indigo-700 bg-indigo-50/70 dark:bg-indigo-950/30",
-];
+import {
+  fetchTodos,
+  localDateTimeInputToIso,
+  TodoItem,
+} from "@/lib/todo-client";
 
 type TimelineTodo = TodoItem & {
   source: "mine" | "shared";
@@ -39,18 +28,26 @@ type SignalPayload =
       candidate: RTCIceCandidateInit;
     };
 
-const monthKey = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+const formatCountdown = (differenceMs: number) => {
+  if (differenceMs <= 0) {
+    return "Starting now";
+  }
 
-const monthLabel = (month: string) => {
-  const [year, monthPart] = month.split("-");
-  return new Date(Number(year), Number(monthPart) - 1, 1).toLocaleString(
-    undefined,
-    {
-      month: "long",
-      year: "numeric",
-    },
-  );
+  const totalSeconds = Math.floor(differenceMs / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const timePart = [hours, minutes, seconds]
+    .map((part) => String(part).padStart(2, "0"))
+    .join(":");
+
+  if (days > 0) {
+    return `${days}d ${timePart}`;
+  }
+
+  return timePart;
 };
 
 export default function TimelinePage() {
@@ -65,6 +62,7 @@ export default function TimelinePage() {
   const [isPreparingCall, setIsPreparingCall] = useState(false);
   const [isEndingCall, setIsEndingCall] = useState(false);
   const [rescheduleInput, setRescheduleInput] = useState("");
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -145,6 +143,26 @@ export default function TimelinePage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      load();
+    }, 10000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [load]);
+
   const handleSignal = useCallback(
     async (todoId: string, payload: SignalPayload) => {
       const connection = peerConnectionRef.current;
@@ -157,7 +175,10 @@ export default function TimelinePage() {
         );
         const answer = await connection.createAnswer();
         await connection.setLocalDescription(answer);
-        if (!connection.localDescription?.type || !connection.localDescription?.sdp) {
+        if (
+          !connection.localDescription?.type ||
+          !connection.localDescription?.sdp
+        ) {
           throw new Error("Failed to prepare WebRTC answer");
         }
         await sendCallSignal(todoId, {
@@ -249,7 +270,10 @@ export default function TimelinePage() {
       if (currentUserId === session.initiatorUserId) {
         const offer = await connection.createOffer();
         await connection.setLocalDescription(offer);
-        if (!connection.localDescription?.type || !connection.localDescription?.sdp) {
+        if (
+          !connection.localDescription?.type ||
+          !connection.localDescription?.sdp
+        ) {
           throw new Error("Failed to prepare WebRTC offer");
         }
         await sendCallSignal(todoId, {
@@ -298,26 +322,35 @@ export default function TimelinePage() {
     [setupPeerConnection],
   );
 
-  const grouped = useMemo(() => {
-    const groups = new Map<string, TimelineTodo[]>();
-    for (const todo of todos) {
-      const key = monthKey(new Date(todo.dueAt as string));
-      const current = groups.get(key) ?? [];
-      current.push(todo);
-      groups.set(key, current);
-    }
-    return Array.from(groups.entries());
+  const sortedTodos = useMemo(() => {
+    return [...todos].sort(
+      (first, second) =>
+        new Date(first.dueAt as string).getTime() -
+        new Date(second.dueAt as string).getTime(),
+    );
   }, [todos]);
 
   const autoCallTodo = useMemo(() => {
-    return todos.find(
+    return sortedTodos.find(
       (todo) =>
         Boolean(todo.sharedWithUserId) &&
         Boolean(todo.dueAt) &&
         !todo.completed &&
-        new Date(todo.dueAt as string).getTime() <= Date.now(),
+        new Date(todo.dueAt as string).getTime() <= nowMs,
     );
-  }, [todos]);
+  }, [nowMs, sortedTodos]);
+
+  const closestTodo = useMemo(() => {
+    const upcoming = sortedTodos.find(
+      (todo) =>
+        !todo.completed && new Date(todo.dueAt as string).getTime() >= nowMs,
+    );
+    if (upcoming) {
+      return upcoming;
+    }
+
+    return sortedTodos.find((todo) => !todo.completed) ?? null;
+  }, [nowMs, sortedTodos]);
 
   const activeTodo = useMemo(
     () => todos.find((todo) => todo.id === activeTodoId) ?? null,
@@ -404,7 +437,7 @@ export default function TimelinePage() {
       await endCallBySharedUser({
         todoId: activeTodoId,
         markDone: false,
-        rescheduleDueAt: rescheduleInput,
+        rescheduleDueAt: localDateTimeInputToIso(rescheduleInput) ?? undefined,
       });
       releaseMediaResources();
       setActiveTodoId(null);
@@ -423,7 +456,7 @@ export default function TimelinePage() {
       todo.sharedWithUserId &&
       todo.dueAt &&
       !todo.completed &&
-      new Date(todo.dueAt).getTime() <= Date.now(),
+      new Date(todo.dueAt).getTime() <= nowMs,
     );
   };
 
@@ -445,79 +478,85 @@ export default function TimelinePage() {
         <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 space-y-4 min-h-[28rem]">
           <h2 className="text-lg font-semibold">Todo List View</h2>
 
-          {isLoading ? null : grouped.length === 0 ? (
+          {isLoading ? null : sortedTodos.length === 0 ? (
             <p className="text-zinc-500 dark:text-zinc-400">
               No todos with date and time set.
             </p>
           ) : (
-            <div className="overflow-x-auto pb-2">
-              <div className="inline-flex items-stretch gap-0 min-w-full">
-                {grouped.map(([month, monthTodos], index) => (
-                  <div key={month} className="inline-flex items-stretch">
-                    <section
-                      className={`w-80 shrink-0 border rounded-lg p-4 ${monthColorClasses[index % monthColorClasses.length]}`}
-                    >
-                      <h3 className="font-semibold mb-3">
-                        {monthLabel(month)}
-                      </h3>
-                      <div className="space-y-3">
-                        {monthTodos.map((todo) => {
-                          const dueReached = canStartCallForTodo(todo);
-                          const isActiveCallTodo = activeTodoId === todo.id;
+            <div className="space-y-3">
+              {sortedTodos.map((todo) => {
+                const dueReached = canStartCallForTodo(todo);
+                const isActiveCallTodo = activeTodoId === todo.id;
+                const isClosestTodo = closestTodo?.id === todo.id;
 
-                          return (
-                            <article
-                              key={todo.id}
-                              className="rounded-md border border-zinc-200 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/70 p-3"
-                            >
-                              <p className="font-medium break-words">
-                                {todo.text}
-                              </p>
-                              {todo.description && (
-                                <p className="text-sm text-zinc-600 dark:text-zinc-300 mt-1 break-words">
-                                  {todo.description}
-                                </p>
-                              )}
-                              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2">
-                                {new Date(
-                                  todo.dueAt as string,
-                                ).toLocaleString()}
-                              </p>
-                              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                                {todo.source === "mine"
-                                  ? "From: My Todos"
-                                  : `From: Shared by ${todo.ownerId}`}
-                              </p>
+                return (
+                  <article
+                    key={todo.id}
+                    className={`rounded-md border p-3 ${
+                      todo.source === "mine"
+                        ? "border-blue-300 dark:border-blue-700 bg-blue-50/60 dark:bg-blue-950/20"
+                        : "border-emerald-300 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-950/20"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-medium break-words">{todo.text}</p>
+                      <span
+                        className={`text-[11px] px-2 py-1 rounded-full ${
+                          todo.source === "mine"
+                            ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200"
+                            : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200"
+                        }`}
+                      >
+                        {todo.source === "mine" ? "Mine" : "Shared with me"}
+                      </span>
+                    </div>
 
-                              {todo.sharedWithUserId ? (
-                                <button
-                                  type="button"
-                                  disabled={!dueReached || isPreparingCall}
-                                  onClick={() => startOrJoinCall(todo)}
-                                  className={`mt-2 w-full px-3 py-2 rounded-md text-sm ${
-                                    isActiveCallTodo
-                                      ? "bg-emerald-600 text-white"
-                                      : "bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-400"
-                                  }`}
-                                >
-                                  {isActiveCallTodo
-                                    ? "Call Active"
-                                    : dueReached
-                                      ? "Start / Join Call"
-                                      : "Call starts when due time is reached"}
-                                </button>
-                              ) : null}
-                            </article>
-                          );
-                        })}
-                      </div>
-                    </section>
-                    {index < grouped.length - 1 && (
-                      <div className="mx-4 h-auto w-px bg-zinc-300 dark:bg-zinc-700 self-stretch" />
+                    {todo.description && (
+                      <p className="text-sm text-zinc-600 dark:text-zinc-300 mt-1 break-words">
+                        {todo.description}
+                      </p>
                     )}
-                  </div>
-                ))}
-              </div>
+
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2">
+                      Due: {new Date(todo.dueAt as string).toLocaleString()}
+                    </p>
+
+                    {isClosestTodo ? (
+                      <p className="text-xs text-amber-600 dark:text-amber-300 mt-1 font-medium">
+                        Starts in{" "}
+                        {formatCountdown(
+                          new Date(todo.dueAt as string).getTime() - nowMs,
+                        )}
+                      </p>
+                    ) : null}
+
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                      {todo.source === "mine"
+                        ? "My Todos"
+                        : `Shared by ${todo.ownerId}`}
+                    </p>
+
+                    {todo.sharedWithUserId ? (
+                      <button
+                        type="button"
+                        disabled={!dueReached || isPreparingCall}
+                        onClick={() => startOrJoinCall(todo)}
+                        className={`mt-2 w-full px-3 py-2 rounded-md text-sm ${
+                          isActiveCallTodo
+                            ? "bg-emerald-600 text-white"
+                            : "bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-400"
+                        }`}
+                      >
+                        {isActiveCallTodo
+                          ? "Call Active"
+                          : dueReached
+                            ? "Start / Join Call"
+                            : "Call starts when due time is reached"}
+                      </button>
+                    ) : null}
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>

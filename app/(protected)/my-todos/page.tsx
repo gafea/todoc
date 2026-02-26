@@ -6,6 +6,7 @@ import {
   createTodo,
   deleteTodo,
   fetchTodos,
+  localDateTimeInputToIso,
   TodoItem,
   toLocalDateTimeInput,
   updateTodo,
@@ -107,7 +108,7 @@ export default function MyTodosPage() {
     if (!dialogState.text.trim()) return;
 
     const selectedDueAt = dialogState.shouldSetDateTime
-      ? dialogState.dueAtInput
+      ? localDateTimeInputToIso(dialogState.dueAtInput)
       : null;
 
     try {

@@ -14,6 +14,13 @@ export interface TodosPayload {
   sharedWithMe: TodoItem[];
 }
 
+export interface ShareBanItem {
+  id: string;
+  blockerUserId: string;
+  blockedUserId: string;
+  createdAt: string;
+}
+
 export const fetchTodos = async (): Promise<TodosPayload> => {
   const response = await fetch("/api/todos", { cache: "no-store" });
   const payload = await response.json().catch(() => null);
@@ -90,6 +97,44 @@ export const removeSharedTodo = async (id: string) => {
   }
 };
 
+export const fetchShareBans = async (): Promise<ShareBanItem[]> => {
+  const response = await fetch("/api/share-bans", { cache: "no-store" });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.error || "Failed to load ban list");
+  }
+
+  return (payload?.bans ?? []) as ShareBanItem[];
+};
+
+export const createShareBan = async (blockedUserId: string) => {
+  const response = await fetch("/api/share-bans", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ blockedUserId }),
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.error || "Failed to create share ban");
+  }
+
+  return payload as ShareBanItem;
+};
+
+export const removeShareBan = async (blockedUserId: string) => {
+  const response = await fetch("/api/share-bans", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ blockedUserId }),
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.error || "Failed to remove share ban");
+  }
+};
+
 export const toLocalDateTimeInput = (value: string | null) => {
   if (!value) {
     const now = new Date();
@@ -100,4 +145,17 @@ export const toLocalDateTimeInput = (value: string | null) => {
   const date = new Date(value);
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
   return date.toISOString().slice(0, 16);
+};
+
+export const localDateTimeInputToIso = (value: string | null) => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString();
 };

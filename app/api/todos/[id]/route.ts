@@ -48,6 +48,20 @@ const parseSharedWithUserId = async (
     throw new Error("Shared user not found");
   }
 
+  const isBlocked = await prisma.userShareBan.findUnique({
+    where: {
+      blockerUserId_blockedUserId: {
+        blockerUserId: sharedWithUserId,
+        blockedUserId: ownerId,
+      },
+    },
+    select: { id: true },
+  });
+
+  if (isBlocked) {
+    throw new Error("This user blocked receiving shared todos from you");
+  }
+
   return sharedWithUserId;
 };
 

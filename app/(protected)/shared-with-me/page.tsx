@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { Trash } from "lucide-react";
-import { fetchTodos, removeSharedTodo, TodoItem } from "@/lib/todo-client";
+import {
+  createShareBan,
+  fetchShareBans,
+  fetchTodos,
+  removeShareBan,
+  removeSharedTodo,
+  ShareBanItem,
+  TodoItem,
+} from "@/lib/todo-client";
 
 const sortTodos = (items: TodoItem[]) => {
   return [...items].sort((first, second) => {
@@ -20,6 +28,7 @@ const sortTodos = (items: TodoItem[]) => {
 
 export default function SharedWithMePage() {
   const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [bans, setBans] = useState<ShareBanItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,8 +36,12 @@ export default function SharedWithMePage() {
   const loadTodos = async () => {
     try {
       setError(null);
-      const payload = await fetchTodos();
+      const [payload, bansPayload] = await Promise.all([
+        fetchTodos(),
+        fetchShareBans(),
+      ]);
       setTodos(payload.sharedWithMe);
+      setBans(bansPayload);
     } catch (loadError) {
       setError((loadError as Error).message);
     } finally {
@@ -53,7 +66,55 @@ export default function SharedWithMePage() {
     }
   };
 
+  const banUser = async (blockedUserId: string) => {
+    try {
+      setIsMutating(true);
+      setError(null);
+      await createShareBan(blockedUserId);
+      await loadTodos();
+    } catch (banError) {
+      setError((banError as Error).message);
+    } finally {
+      setIsMutating(false);
+    }
+  };
+
+  const unbanUser = async (blockedUserId: string) => {
+    try {
+      setIsMutating(true);
+      setError(null);
+      await removeShareBan(blockedUserId);
+      await loadTodos();
+    } catch (unbanError) {
+      setError((unbanError as Error).message);
+    } finally {
+      setIsMutating(false);
+    }
+  };
+
   const sortedTodos = sortTodos(todos);
+  const todosByOwner = sortedTodos.reduce<Record<string, TodoItem[]>>(
+    (accumulator, todo) => {
+      const ownerKey = todo.ownerId;
+      const currentTodos = accumulator[ownerKey] ?? [];
+      currentTodos.push(todo);
+      accumulator[ownerKey] = sortTodos(currentTodos);
+      return accumulator;
+    },
+    {},
+  );
+
+  const ownerIds = Object.keys(todosByOwner).sort((first, second) => {
+    const firstSoonest = todosByOwner[first]?.[0]?.dueAt
+      ? new Date(todosByOwner[first][0].dueAt as string).getTime()
+      : Number.MAX_SAFE_INTEGER;
+    const secondSoonest = todosByOwner[second]?.[0]?.dueAt
+      ? new Date(todosByOwner[second][0].dueAt as string).getTime()
+      : Number.MAX_SAFE_INTEGER;
+    return firstSoonest - secondSoonest;
+  });
+
+  const bannedUserIds = new Set(bans.map((ban) => ban.blockedUserId));
 
   return (
     <div className="space-y-4">
@@ -63,45 +124,107 @@ export default function SharedWithMePage() {
         <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
       )}
 
+      {bans.length > 0 && (
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-3">
+          <h2 className="text-lg font-semibold">Ban List</h2>
+          <div className="flex flex-wrap gap-2">
+            {bans.map((ban) => (
+              <button
+                key={ban.id}
+                type="button"
+                disabled={isMutating}
+                onClick={() => unbanUser(ban.blockedUserId)}
+                className="px-3 py-1.5 rounded-md text-sm bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+              >
+                Unban {ban.blockedUserId}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       {isLoading ? null : sortedTodos.length === 0 ? (
         <p className="text-zinc-500 dark:text-zinc-400">No shared todos.</p>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {sortedTodos.map((todo) => (
-            <div
-              key={todo.id}
-              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-3"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <h2 className="font-semibold break-words">{todo.text}</h2>
-                <button
-                  type="button"
-                  disabled={isMutating}
-                  onClick={() => removeFromShared(todo.id)}
-                  className="px-3 py-1.5 rounded-md text-sm bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white inline-flex items-center gap-1"
+        <div className="overflow-x-auto pb-2">
+          <div className="inline-flex items-start gap-4 min-w-full">
+            {ownerIds.map((ownerId) => {
+              const ownerTodos = todosByOwner[ownerId] ?? [];
+              const isBanned = bannedUserIds.has(ownerId);
+
+              return (
+                <section
+                  key={ownerId}
+                  className="w-80 shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-3"
                 >
-                  <Trash size={14} />
-                  Remove
-                </button>
-              </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h2 className="font-semibold break-all">{ownerId}</h2>
+                    </div>
+                    {isBanned ? (
+                      <button
+                        type="button"
+                        disabled={isMutating}
+                        onClick={() => unbanUser(ownerId)}
+                        className="px-3 py-1.5 rounded-md text-sm bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+                      >
+                        Unban
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={isMutating}
+                        onClick={() => banUser(ownerId)}
+                        className="px-3 py-1.5 rounded-md text-sm bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white"
+                      >
+                        Ban
+                      </button>
+                    )}
+                  </div>
 
-              {todo.description && (
-                <p className="text-sm text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap break-words">
-                  {todo.description}
-                </p>
-              )}
+                  <div className="space-y-3">
+                    {ownerTodos.map((todo) => (
+                      <article
+                        key={todo.id}
+                        className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="font-medium break-words">
+                            {todo.text}
+                          </h3>
+                          <button
+                            type="button"
+                            disabled={isMutating}
+                            onClick={() => removeFromShared(todo.id)}
+                            className="px-2 py-1 rounded-md text-xs bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white inline-flex items-center gap-1"
+                          >
+                            <Trash size={12} />
+                            Remove
+                          </button>
+                        </div>
 
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Shared by: {todo.ownerId}
-              </p>
+                        {todo.description && (
+                          <p className="text-sm text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap break-words">
+                            {todo.description}
+                          </p>
+                        )}
 
-              {todo.dueAt && (
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Due: {new Date(todo.dueAt).toLocaleString()}
-                </p>
-              )}
-            </div>
-          ))}
+                        {todo.dueAt ? (
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                            Due: {new Date(todo.dueAt).toLocaleString()}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                            Due: Not set
+                          </p>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

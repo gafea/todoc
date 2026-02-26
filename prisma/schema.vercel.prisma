@@ -18,6 +18,8 @@ model User {
   receivedCalls  CallSession[] @relation("CallRecipient")
   sentSignals    CallSignal[]  @relation("CallSignalSender")
   receivedSignals CallSignal[] @relation("CallSignalRecipient")
+  blockedUsers   UserShareBan[] @relation("ShareBanBlocker")
+  blockedByUsers UserShareBan[] @relation("ShareBanBlocked")
 }
 
 model Credential {
@@ -82,4 +84,17 @@ model CallSignal {
 
   @@index([callSessionId])
   @@index([toUserId, deliveredAt])
+}
+
+model UserShareBan {
+  id            String   @id @default(cuid())
+  blockerUserId String
+  blockedUserId String
+  createdAt     DateTime @default(now())
+  blocker       User     @relation("ShareBanBlocker", fields: [blockerUserId], references: [id], onDelete: Cascade)
+  blocked       User     @relation("ShareBanBlocked", fields: [blockedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerUserId, blockedUserId])
+  @@index([blockerUserId])
+  @@index([blockedUserId])
 }
