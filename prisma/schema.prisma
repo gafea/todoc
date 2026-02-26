@@ -1,0 +1,25 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String       @id @default(cuid())
+  createdAt   DateTime     @default(now())
+  credentials Credential[]
+}
+
+model Credential {
+  id           String  @id @default(cuid())
+  credentialId String  @unique
+  publicKey    String
+  counter      Int
+  transports   String?
+  userId       String
+  user         User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
