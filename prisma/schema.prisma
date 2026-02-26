@@ -9,9 +9,11 @@ datasource db {
 }
 
 model User {
-  id          String       @id @default(cuid())
-  createdAt   DateTime     @default(now())
-  credentials Credential[]
+  id           String       @id @default(cuid())
+  createdAt    DateTime     @default(now())
+  credentials  Credential[]
+  ownedTodos   Todo[]       @relation("OwnerTodos")
+  sharedTodos  Todo[]       @relation("SharedTodos")
 }
 
 model Credential {
@@ -22,4 +24,21 @@ model Credential {
   transports   String?
   userId       String
   user         User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Todo {
+  id               String    @id @default(cuid())
+  text             String
+  description      String
+  completed        Boolean   @default(false)
+  dueAt            DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  ownerId          String
+  owner            User      @relation("OwnerTodos", fields: [ownerId], references: [id], onDelete: Cascade)
+  sharedWithUserId String?
+  sharedWith       User?     @relation("SharedTodos", fields: [sharedWithUserId], references: [id], onDelete: SetNull)
+
+  @@index([ownerId])
+  @@index([sharedWithUserId])
 }
