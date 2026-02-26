@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { PrismaClient } from "@/src/generated/client";
+import { PrismaClient } from "@prisma/client";
 
 const SQLITE_PREFIX = "file:";
 const VERCEL_TMP_DIR = "/tmp";
