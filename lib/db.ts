@@ -50,9 +50,10 @@ const resolveSqlitePath = () => {
 
   const workspaceRoot = getWorkspaceRoot();
   const prismaSchemaDir = getPrismaSchemaDir(workspaceRoot);
-  let absolutePath = path.isAbsolute(sqlitePath)
+  const originalAbsolutePath = path.isAbsolute(sqlitePath)
     ? sqlitePath
     : path.resolve(prismaSchemaDir, sqlitePath);
+  let absolutePath = originalAbsolutePath;
 
   const isVercelProduction =
     process.env.VERCEL === "1" && process.env.NODE_ENV === "production";
@@ -62,14 +63,22 @@ const resolveSqlitePath = () => {
   }
 
   const normalized = absolutePath.split(path.sep).join("/");
-  return { normalized, absolutePath, query };
+  return { normalized, absolutePath, query, originalAbsolutePath };
 };
 
-const ensureSqliteFile = (absolutePath: string) => {
+const ensureSqliteFile = (absolutePath: string, originalAbsolutePath: string) => {
   const directory = path.dirname(absolutePath);
   fs.mkdirSync(directory, { recursive: true });
 
   if (!fs.existsSync(absolutePath)) {
+    if (
+      absolutePath !== originalAbsolutePath &&
+      fs.existsSync(originalAbsolutePath)
+    ) {
+      fs.copyFileSync(originalAbsolutePath, absolutePath);
+      return;
+    }
+
     fs.closeSync(fs.openSync(absolutePath, "w"));
   }
 };
@@ -80,7 +89,7 @@ const bootstrapDatabaseEnv = () => {
     return;
   }
 
-  ensureSqliteFile(resolved.absolutePath);
+  ensureSqliteFile(resolved.absolutePath, resolved.originalAbsolutePath);
   process.env.DATABASE_URL = `${SQLITE_PREFIX}${resolved.normalized}${resolved.query}`;
 };
 
