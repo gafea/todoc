@@ -54,6 +54,3 @@ dev.db
 !.vscode/launch.json
 !.vscode/tasks.json
 .idea/
-
-# generated
-/src/generated

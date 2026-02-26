@@ -54,37 +54,12 @@ export function Sidebar() {
   return (
     <aside className="w-full md:w-64 border-b md:border-b-0 md:border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
       <div className="p-4 md:p-5 space-y-3">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-            Todo
-          </h2>
-          <button
-            type="button"
-            onClick={handleLogout}
-            disabled={isLoggingOut}
-            className="px-3 py-1.5 text-sm rounded-md border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 inline-flex items-center gap-1"
-          >
-            <LogOut size={14} />
-            Logout
-          </button>
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 break-all">
-            {userId ? `Hello, ${userId}` : "Loading user..."}
-          </p>
-          <button
-            type="button"
-            onClick={handleCopyUserId}
-            disabled={!userId}
-            className="px-3 py-1.5 text-xs rounded-md border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1"
-          >
-            <Copy size={14} /> {copyState === "copied" ? "Copied" : "Copy"}
-          </button>
-        </div>
+        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+          Todo
+        </h2>
       </div>
 
-      <nav className="px-3 pb-4 md:pb-5 flex md:block gap-2 md:gap-1 overflow-x-auto md:overflow-visible whitespace-nowrap">
+      <nav className="px-3 flex md:block gap-2 md:gap-1 overflow-x-auto md:overflow-visible whitespace-nowrap">
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           return (
@@ -110,6 +85,32 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      <div className="p-4 md:p-5 space-y-3">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400 break-all">
+          {userId ? `Hello, ${userId}` : ""}
+        </p>
+        <div className="flex items-center justify-between gap-4">
+          <button
+            type="button"
+            onClick={handleCopyUserId}
+            disabled={!userId}
+            className="px-3 py-1.5 text-xs rounded-md border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1"
+          >
+            <Copy size={14} />
+            {copyState === "copied" ? "Copied!" : "Copy"}
+          </button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={isLoggingOut}
+            className="px-3 py-1.5 text-xs rounded-md border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 inline-flex items-center gap-1"
+          >
+            <LogOut size={14} />
+            Logout
+          </button>
+        </div>
+      </div>
     </aside>
   );
 }
