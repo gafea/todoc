@@ -63,6 +63,13 @@ export default function TimelinePage() {
   const [isEndingCall, setIsEndingCall] = useState(false);
   const [rescheduleInput, setRescheduleInput] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [debugMessages, setDebugMessages] = useState<string[]>([]);
+  const [iceConnectionState, setIceConnectionState] =
+    useState<RTCIceConnectionState>("new");
+  const [signalingState, setSignalingState] =
+    useState<RTCSignalingState>("stable");
+  const [connectionState, setConnectionState] =
+    useState<RTCPeerConnectionState>("new");
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -71,10 +78,21 @@ export default function TimelinePage() {
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const isStartingRef = useRef(false);
 
+  const pushDebugMessage = useCallback((message: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const entry = `[${timestamp}] ${message}`;
+    setDebugMessages((current) => [...current.slice(-24), entry]);
+  }, []);
+
   const releaseMediaResources = useCallback(() => {
+    pushDebugMessage("Releasing media resources and closing peer connection");
+
     if (peerConnectionRef.current) {
       peerConnectionRef.current.ontrack = null;
       peerConnectionRef.current.onicecandidate = null;
+      peerConnectionRef.current.oniceconnectionstatechange = null;
+      peerConnectionRef.current.onsignalingstatechange = null;
+      peerConnectionRef.current.onconnectionstatechange = null;
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
@@ -96,7 +114,11 @@ export default function TimelinePage() {
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
     }
-  }, []);
+
+    setIceConnectionState("new");
+    setSignalingState("stable");
+    setConnectionState("new");
+  }, [pushDebugMessage]);
 
   const load = useCallback(async () => {
     try {
@@ -169,6 +191,7 @@ export default function TimelinePage() {
       if (!connection) return;
 
       if (payload.type === "offer") {
+        pushDebugMessage("Received offer signal");
         if (!payload.sdp?.type || !payload.sdp?.sdp) return;
         await connection.setRemoteDescription(
           new RTCSessionDescription(payload.sdp),
@@ -188,9 +211,11 @@ export default function TimelinePage() {
             sdp: connection.localDescription.sdp,
           },
         });
+        pushDebugMessage("Sent answer signal");
       }
 
       if (payload.type === "answer") {
+        pushDebugMessage("Received answer signal");
         if (!payload.sdp?.type || !payload.sdp?.sdp) return;
         if (!connection.currentRemoteDescription) {
           await connection.setRemoteDescription(
@@ -200,16 +225,18 @@ export default function TimelinePage() {
       }
 
       if (payload.type === "ice") {
+        pushDebugMessage("Received ICE candidate");
         await connection.addIceCandidate(
           new RTCIceCandidate(payload.candidate),
         );
       }
     },
-    [],
+    [pushDebugMessage],
   );
 
   const setupPeerConnection = useCallback(
     async (todoId: string, session: CallSessionPayload) => {
+      pushDebugMessage("Initializing peer connection");
       releaseMediaResources();
 
       if (
@@ -232,6 +259,7 @@ export default function TimelinePage() {
         video: true,
         audio: true,
       });
+      pushDebugMessage("Local media stream acquired");
 
       const connection = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -252,6 +280,7 @@ export default function TimelinePage() {
       stream.getTracks().forEach((track) => connection.addTrack(track, stream));
 
       connection.ontrack = (event) => {
+        pushDebugMessage("Remote track received");
         event.streams[0]?.getTracks().forEach((track) => {
           remoteStream.addTrack(track);
         });
@@ -263,11 +292,28 @@ export default function TimelinePage() {
           type: "ice",
           candidate: event.candidate.toJSON(),
         });
+        pushDebugMessage("Sent ICE candidate");
+      };
+
+      connection.oniceconnectionstatechange = () => {
+        setIceConnectionState(connection.iceConnectionState);
+        pushDebugMessage(`ICE state: ${connection.iceConnectionState}`);
+      };
+
+      connection.onsignalingstatechange = () => {
+        setSignalingState(connection.signalingState);
+        pushDebugMessage(`Signaling state: ${connection.signalingState}`);
+      };
+
+      connection.onconnectionstatechange = () => {
+        setConnectionState(connection.connectionState);
+        pushDebugMessage(`Connection state: ${connection.connectionState}`);
       };
 
       peerConnectionRef.current = connection;
 
       if (currentUserId === session.initiatorUserId) {
+        pushDebugMessage("Current user is initiator, creating offer");
         const offer = await connection.createOffer();
         await connection.setLocalDescription(offer);
         if (
@@ -283,9 +329,10 @@ export default function TimelinePage() {
             sdp: connection.localDescription.sdp,
           },
         });
+        pushDebugMessage("Sent offer signal");
       }
     },
-    [currentUserId, releaseMediaResources],
+    [currentUserId, pushDebugMessage, releaseMediaResources],
   );
 
   const startOrJoinCall = useCallback(
@@ -304,22 +351,32 @@ export default function TimelinePage() {
         isStartingRef.current = true;
         setError(null);
         setIsPreparingCall(true);
+        setDebugMessages([]);
+        pushDebugMessage(`Starting or joining call for todo ${todo.id}`);
 
         const started = await startCallForTodo(todo.id);
+        pushDebugMessage(`Call session ready (${started.session.status})`);
+        await setupPeerConnection(todo.id, started.session);
+
         setActiveTodoId(todo.id);
         setActiveCallSession(started.session);
         setCallRole(started.role);
         setRescheduleInput("");
-
-        await setupPeerConnection(todo.id, started.session);
       } catch (startError) {
+        releaseMediaResources();
+        setActiveTodoId(null);
+        setActiveCallSession(null);
+        setCallRole(null);
+        pushDebugMessage(
+          `Call setup failed: ${(startError as Error).message || "Unknown error"}`,
+        );
         setError((startError as Error).message);
       } finally {
         setIsPreparingCall(false);
         isStartingRef.current = false;
       }
     },
-    [setupPeerConnection],
+    [pushDebugMessage, releaseMediaResources, setupPeerConnection],
   );
 
   const sortedTodos = useMemo(() => {
@@ -369,7 +426,7 @@ export default function TimelinePage() {
   }, [autoCallTodo, activeTodoId, currentUserId, startOrJoinCall]);
 
   useEffect(() => {
-    if (!activeTodoId || !peerConnectionRef.current) return;
+    if (!activeTodoId) return;
 
     let cancelled = false;
     const intervalId = window.setInterval(async () => {
@@ -377,7 +434,14 @@ export default function TimelinePage() {
         const callData = await pollCallForTodo(activeTodoId);
         if (cancelled) return;
 
+        if (callData.signals.length > 0) {
+          pushDebugMessage(
+            `Polled ${callData.signals.length} pending signal(s) from server`,
+          );
+        }
+
         if (!callData.session || callData.session.status !== "active") {
+          pushDebugMessage("Call session is no longer active");
           releaseMediaResources();
           setActiveCallSession(callData.session);
           setActiveTodoId(null);
@@ -394,6 +458,9 @@ export default function TimelinePage() {
         }
       } catch (pollError) {
         if (!cancelled) {
+          pushDebugMessage(
+            `Polling error: ${(pollError as Error).message || "Unknown error"}`,
+          );
           setError((pollError as Error).message);
         }
       }
@@ -403,7 +470,33 @@ export default function TimelinePage() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [activeTodoId, handleSignal, releaseMediaResources]);
+  }, [activeTodoId, handleSignal, pushDebugMessage, releaseMediaResources]);
+
+  useEffect(() => {
+    if (localVideoRef.current && localStreamRef.current) {
+      if (localVideoRef.current.srcObject !== localStreamRef.current) {
+        localVideoRef.current.srcObject = localStreamRef.current;
+      }
+
+      void localVideoRef.current.play().catch((playError) => {
+        pushDebugMessage(
+          `Local autoplay blocked: ${(playError as Error).message || "Unknown error"}`,
+        );
+      });
+    }
+
+    if (remoteVideoRef.current && remoteStreamRef.current) {
+      if (remoteVideoRef.current.srcObject !== remoteStreamRef.current) {
+        remoteVideoRef.current.srcObject = remoteStreamRef.current;
+      }
+
+      void remoteVideoRef.current.play().catch((playError) => {
+        pushDebugMessage(
+          `Remote autoplay blocked: ${(playError as Error).message || "Unknown error"}`,
+        );
+      });
+    }
+  }, [activeTodoId, activeCallSession, pushDebugMessage]);
 
   useEffect(() => {
     return () => {
@@ -465,6 +558,18 @@ export default function TimelinePage() {
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     return now.toISOString().slice(0, 16);
   }, []);
+
+  const remoteUserId = useMemo(() => {
+    if (!activeCallSession || !currentUserId) {
+      return null;
+    }
+
+    if (currentUserId === activeCallSession.initiatorUserId) {
+      return activeCallSession.recipientUserId;
+    }
+
+    return activeCallSession.initiatorUserId;
+  }, [activeCallSession, currentUserId]);
 
   return (
     <div className="space-y-4">
@@ -572,6 +677,9 @@ export default function TimelinePage() {
             <>
               <div className="grid grid-cols-1 gap-3">
                 <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-black/90 overflow-hidden">
+                  <div className="px-3 py-2 text-xs text-zinc-200 bg-zinc-900/80 border-b border-zinc-700">
+                    Remote: {remoteUserId ?? "Unknown"}
+                  </div>
                   <video
                     ref={remoteVideoRef}
                     autoPlay
@@ -581,6 +689,9 @@ export default function TimelinePage() {
                 </div>
 
                 <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-black/90 overflow-hidden">
+                  <div className="px-3 py-2 text-xs text-zinc-200 bg-zinc-900/80 border-b border-zinc-700">
+                    You: {currentUserId ?? "Unknown"}
+                  </div>
                   <video
                     ref={localVideoRef}
                     autoPlay
@@ -593,20 +704,37 @@ export default function TimelinePage() {
 
               <div className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1">
                 <p>Todo: {activeTodo.text}</p>
-                <p>
-                  Role: {callRole === "A" ? "A (owner)" : "B (shared user)"}
-                </p>
+                <p>Role: {callRole === "A" ? "Owner" : "Shared user"}</p>
                 <p>
                   Call state:{" "}
                   {isPreparingCall ? "Preparing..." : activeCallSession.status}
                 </p>
               </div>
 
+              <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3">
+                <p className="text-sm font-medium mb-2">WebRTC Debug</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 mb-2">
+                  Peer: {connectionState}, ICE: {iceConnectionState}, Signaling:{" "}
+                  {signalingState}
+                </p>
+                <div className="max-h-36 overflow-y-auto space-y-1 text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                  {debugMessages.length === 0 ? (
+                    <p>No debug events yet.</p>
+                  ) : (
+                    debugMessages
+                      .slice()
+                      .reverse()
+                      .map((message, index) => (
+                        <p key={`${message}-${index}`}>{message}</p>
+                      ))
+                  )}
+                </div>
+              </div>
+
               {isCurrentUserB ? (
                 <div className="space-y-2 rounded-lg border border-zinc-200 dark:border-zinc-700 p-3">
                   <p className="text-sm font-medium">
-                    Only B can stop the call and choose completion or
-                    reschedule.
+                    You can stop the call and mark as complete or reschedule.
                   </p>
                   <button
                     type="button"
@@ -614,7 +742,7 @@ export default function TimelinePage() {
                     disabled={isEndingCall}
                     className="w-full px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-sm"
                   >
-                    Stop Call & Mark Todo Done
+                    Stop Call & Mark as Done
                   </button>
 
                   <input
@@ -635,7 +763,8 @@ export default function TimelinePage() {
                 </div>
               ) : (
                 <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                  Waiting for B to stop the call and decide done/reschedule.
+                  Waiting for your friend to stop the call and decide
+                  done/reschedule.
                 </p>
               )}
             </>
