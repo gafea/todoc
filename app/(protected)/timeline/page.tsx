@@ -77,6 +77,7 @@ export default function TimelinePage() {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
+  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const isStartingRef = useRef(false);
   const isPollingRef = useRef(false);
   const isRefreshingRef = useRef(false);
@@ -99,6 +100,8 @@ export default function TimelinePage() {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+
+    pendingIceCandidatesRef.current = [];
 
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -193,12 +196,26 @@ export default function TimelinePage() {
       const connection = peerConnectionRef.current;
       if (!connection) return;
 
+      const flushPendingIceCandidates = async () => {
+        if (!connection.currentRemoteDescription) {
+          return;
+        }
+
+        while (pendingIceCandidatesRef.current.length > 0) {
+          const candidate = pendingIceCandidatesRef.current.shift();
+          if (!candidate) continue;
+          await connection.addIceCandidate(new RTCIceCandidate(candidate));
+          pushDebugMessage("Applied queued ICE candidate");
+        }
+      };
+
       if (payload.type === "offer") {
         pushDebugMessage("Received offer signal");
         if (!payload.sdp?.type || !payload.sdp?.sdp) return;
         await connection.setRemoteDescription(
           new RTCSessionDescription(payload.sdp),
         );
+        await flushPendingIceCandidates();
         const answer = await connection.createAnswer();
         await connection.setLocalDescription(answer);
         if (
@@ -225,10 +242,19 @@ export default function TimelinePage() {
             new RTCSessionDescription(payload.sdp),
           );
         }
+        await flushPendingIceCandidates();
       }
 
       if (payload.type === "ice") {
         pushDebugMessage("Received ICE candidate");
+        if (!connection.currentRemoteDescription) {
+          pendingIceCandidatesRef.current.push(payload.candidate);
+          pushDebugMessage(
+            "Queued ICE candidate (remote description not ready)",
+          );
+          return;
+        }
+
         await connection.addIceCandidate(
           new RTCIceCandidate(payload.candidate),
         );
@@ -508,7 +534,10 @@ export default function TimelinePage() {
       }
 
       void localVideoRef.current.play().catch((playError) => {
-        if (playError instanceof DOMException && playError.name === "AbortError") {
+        if (
+          playError instanceof DOMException &&
+          playError.name === "AbortError"
+        ) {
           return;
         }
         pushDebugMessage(
@@ -523,7 +552,10 @@ export default function TimelinePage() {
       }
 
       void remoteVideoRef.current.play().catch((playError) => {
-        if (playError instanceof DOMException && playError.name === "AbortError") {
+        if (
+          playError instanceof DOMException &&
+          playError.name === "AbortError"
+        ) {
           return;
         }
         pushDebugMessage(
