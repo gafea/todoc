@@ -1,9 +1,7 @@
 const normalizeOrigin = (value: string) => value.replace(/\/+$/, "");
 
 const resolveBaseUrl = () => {
-  const candidate =
-    process.env.APP_BASE_URL ||
-    process.env.NEXT_PUBLIC_APP_URL;
+  const candidate = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL;
 
   if (!candidate) {
     throw new Error(

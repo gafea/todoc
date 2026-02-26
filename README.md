@@ -32,3 +32,13 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 - `APP_BASE_URL` should match the app origin used in browser.
 - `RP_ID` is usually `localhost` in local development.
 - `SECRET_COOKIE_PASSWORD` must be at least 32 characters.
+
+## Deploying to Vercel
+
+- Set these environment variables in Vercel:
+  - `DATABASE_URL` (for SQLite this can be `file:./dev.db`)
+  - `APP_BASE_URL`
+  - `RP_ID`
+  - `SECRET_COOKIE_PASSWORD`
+- This app currently uses SQLite. On Vercel, SQLite is mapped to `/tmp` at runtime to avoid read-only filesystem errors.
+- `/tmp` is ephemeral, so SQLite data is not durable across deploys/restarts. For durable production storage, move to a managed database provider and update Prisma datasource accordingly.

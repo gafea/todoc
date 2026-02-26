@@ -3,6 +3,7 @@ import path from "path";
 import { PrismaClient } from "@/src/generated/client";
 
 const SQLITE_PREFIX = "file:";
+const VERCEL_TMP_DIR = "/tmp";
 
 const getWorkspaceRoot = () => process.env.PROJECT_ROOT ?? process.cwd();
 
@@ -49,9 +50,16 @@ const resolveSqlitePath = () => {
 
   const workspaceRoot = getWorkspaceRoot();
   const prismaSchemaDir = getPrismaSchemaDir(workspaceRoot);
-  const absolutePath = path.isAbsolute(sqlitePath)
+  let absolutePath = path.isAbsolute(sqlitePath)
     ? sqlitePath
     : path.resolve(prismaSchemaDir, sqlitePath);
+
+  const isVercelProduction =
+    process.env.VERCEL === "1" && process.env.NODE_ENV === "production";
+  if (isVercelProduction && !absolutePath.startsWith(VERCEL_TMP_DIR)) {
+    const dbFileName = path.basename(absolutePath);
+    absolutePath = path.join(VERCEL_TMP_DIR, "prisma", dbFileName);
+  }
 
   const normalized = absolutePath.split(path.sep).join("/");
   return { normalized, absolutePath, query };
