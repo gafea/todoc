@@ -10,6 +10,7 @@ export interface TodoItem {
 }
 
 export interface TodosPayload {
+  currentUserId: string;
   owned: TodoItem[];
   sharedWithMe: TodoItem[];
 }
@@ -30,6 +31,7 @@ export const fetchTodos = async (): Promise<TodosPayload> => {
   }
 
   return {
+    currentUserId: (payload?.currentUserId ?? "") as string,
     owned: (payload?.owned ?? []) as TodoItem[],
     sharedWithMe: (payload?.sharedWithMe ?? []) as TodoItem[],
   };

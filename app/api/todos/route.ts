@@ -109,6 +109,7 @@ export async function GET(request: NextRequest) {
   ]);
 
   return NextResponse.json({
+    currentUserId: session.userId,
     owned: ownedTodos.map(serializeTodo),
     sharedWithMe: sharedWithMeTodos.map(serializeTodo),
   });

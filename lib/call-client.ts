@@ -16,6 +16,16 @@ export type CallSignalPayload = {
   createdAt: string;
 };
 
+export class CallApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "CallApiError";
+    this.status = status;
+  }
+}
+
 export const startCallForTodo = async (todoId: string) => {
   const response = await fetch(`/api/todos/${todoId}/call/start`, {
     method: "POST",
@@ -37,9 +47,21 @@ export const pollCallForTodo = async (todoId: string) => {
     cache: "no-store",
   });
 
-  const payload = await response.json().catch(() => null);
+  const rawBody = await response.text().catch(() => "");
+  const payload = (() => {
+    try {
+      return rawBody ? JSON.parse(rawBody) : null;
+    } catch {
+      return null;
+    }
+  })();
+
   if (!response.ok) {
-    throw new Error(payload?.error || "Failed to poll call");
+    throw new CallApiError(
+      payload?.error ||
+        (rawBody ? `${rawBody.slice(0, 180)}` : "Failed to poll call"),
+      response.status,
+    );
   }
 
   return payload as {

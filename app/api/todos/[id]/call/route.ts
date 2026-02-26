@@ -45,7 +45,24 @@ export async function GET(
   }
 
   const { id } = await context.params;
-  const todo = await prisma.todo.findUnique({ where: { id } });
+  const todo = await prisma.todo.findUnique({
+    where: { id },
+    select: {
+      ownerId: true,
+      sharedWithUserId: true,
+      callSession: {
+        select: {
+          id: true,
+          todoId: true,
+          initiatorUserId: true,
+          recipientUserId: true,
+          status: true,
+          startedAt: true,
+          endedAt: true,
+        },
+      },
+    },
+  });
 
   if (!todo) {
     return NextResponse.json({ error: "Todo not found" }, { status: 404 });
@@ -65,9 +82,7 @@ export async function GET(
     );
   }
 
-  const callSession = await prisma.callSession.findUnique({
-    where: { todoId: id },
-  });
+  const callSession = todo.callSession;
 
   if (!callSession) {
     return NextResponse.json({ session: null, signals: [] });

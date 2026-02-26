@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  CallApiError,
   endCallBySharedUser,
   pollCallForTodo,
   sendCallSignal,
@@ -77,6 +78,8 @@ export default function TimelinePage() {
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const isStartingRef = useRef(false);
+  const isPollingRef = useRef(false);
+  const isRefreshingRef = useRef(false);
 
   const pushDebugMessage = useCallback((message: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -121,19 +124,18 @@ export default function TimelinePage() {
   }, [pushDebugMessage]);
 
   const load = useCallback(async () => {
+    if (isRefreshingRef.current) {
+      return;
+    }
+
+    isRefreshingRef.current = true;
+
     try {
       setError(null);
-      const [payload, authResponse] = await Promise.all([
-        fetchTodos(),
-        fetch("/api/auth/status", { cache: "no-store" }),
-      ]);
+      const payload = await fetchTodos();
 
-      const authPayload = await authResponse.json().catch(() => null);
-      if (
-        authPayload?.authenticated &&
-        typeof authPayload?.userId === "string"
-      ) {
-        setCurrentUserId(authPayload.userId);
+      if (payload.currentUserId) {
+        setCurrentUserId(payload.currentUserId);
       }
 
       const withDueDates: TimelineTodo[] = [
@@ -158,6 +160,7 @@ export default function TimelinePage() {
       setError((loadError as Error).message);
     } finally {
       setIsLoading(false);
+      isRefreshingRef.current = false;
     }
   }, []);
 
@@ -430,6 +433,12 @@ export default function TimelinePage() {
 
     let cancelled = false;
     const intervalId = window.setInterval(async () => {
+      if (isPollingRef.current) {
+        return;
+      }
+
+      isPollingRef.current = true;
+
       try {
         const callData = await pollCallForTodo(activeTodoId);
         if (cancelled) return;
@@ -458,16 +467,36 @@ export default function TimelinePage() {
         }
       } catch (pollError) {
         if (!cancelled) {
+          if (
+            pollError instanceof CallApiError &&
+            [400, 403, 404].includes(pollError.status)
+          ) {
+            pushDebugMessage(
+              `Polling stopped (HTTP ${pollError.status}): ${pollError.message}`,
+            );
+            releaseMediaResources();
+            setActiveCallSession(null);
+            setActiveTodoId(null);
+            setCallRole(null);
+            return;
+          }
+
           pushDebugMessage(
             `Polling error: ${(pollError as Error).message || "Unknown error"}`,
           );
-          setError((pollError as Error).message);
+
+          if (!(pollError instanceof DOMException)) {
+            setError((pollError as Error).message);
+          }
         }
+      } finally {
+        isPollingRef.current = false;
       }
     }, 1500);
 
     return () => {
       cancelled = true;
+      isPollingRef.current = false;
       window.clearInterval(intervalId);
     };
   }, [activeTodoId, handleSignal, pushDebugMessage, releaseMediaResources]);
@@ -479,6 +508,9 @@ export default function TimelinePage() {
       }
 
       void localVideoRef.current.play().catch((playError) => {
+        if (playError instanceof DOMException && playError.name === "AbortError") {
+          return;
+        }
         pushDebugMessage(
           `Local autoplay blocked: ${(playError as Error).message || "Unknown error"}`,
         );
@@ -491,6 +523,9 @@ export default function TimelinePage() {
       }
 
       void remoteVideoRef.current.play().catch((playError) => {
+        if (playError instanceof DOMException && playError.name === "AbortError") {
+          return;
+        }
         pushDebugMessage(
           `Remote autoplay blocked: ${(playError as Error).message || "Unknown error"}`,
         );
