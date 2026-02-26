@@ -11,13 +11,23 @@ const migrationsPath = isVercelDeployment
   ? "prisma/migrations-postgres"
   : "prisma/migrations";
 
+const databaseUrl = env("DATABASE_URL");
+const directUrl = isVercelDeployment ? env("DIRECT_URL") : undefined;
+
+const datasourceConfig = isVercelDeployment
+  ? {
+      url: databaseUrl,
+      directUrl,
+    }
+  : {
+      url: databaseUrl,
+    };
+
 export default defineConfig({
   schema: schemaPath,
   migrations: {
     path: migrationsPath,
   },
   engine: "classic",
-  datasource: {
-    url: env("DATABASE_URL"),
-  },
+  datasource: datasourceConfig,
 });
