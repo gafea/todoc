@@ -204,8 +204,18 @@ export default function TimelinePage() {
         while (pendingIceCandidatesRef.current.length > 0) {
           const candidate = pendingIceCandidatesRef.current.shift();
           if (!candidate) continue;
-          await connection.addIceCandidate(new RTCIceCandidate(candidate));
-          pushDebugMessage("Applied queued ICE candidate");
+          try {
+            if (!connection.currentRemoteDescription) {
+              pendingIceCandidatesRef.current.unshift(candidate);
+              break;
+            }
+            await connection.addIceCandidate(new RTCIceCandidate(candidate));
+            pushDebugMessage("Applied queued ICE candidate");
+          } catch (candidateError) {
+            pushDebugMessage(
+              `Failed queued ICE candidate: ${(candidateError as Error).message || "Unknown error"}`,
+            );
+          }
         }
       };
 
@@ -255,9 +265,14 @@ export default function TimelinePage() {
           return;
         }
 
-        await connection.addIceCandidate(
-          new RTCIceCandidate(payload.candidate),
-        );
+        try {
+          await connection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+        } catch (candidateError) {
+          pendingIceCandidatesRef.current.push(payload.candidate);
+          pushDebugMessage(
+            `Deferred ICE candidate after add error: ${(candidateError as Error).message || "Unknown error"}`,
+          );
+        }
       }
     },
     [pushDebugMessage],
@@ -486,10 +501,25 @@ export default function TimelinePage() {
 
         setActiveCallSession(callData.session);
 
-        for (const signal of callData.signals) {
+        const orderedSignals = [...callData.signals].sort((first, second) => {
+          const firstType = (first.payload as { type?: string })?.type;
+          const secondType = (second.payload as { type?: string })?.type;
+          const firstPriority = firstType === "offer" || firstType === "answer" ? 0 : 1;
+          const secondPriority =
+            secondType === "offer" || secondType === "answer" ? 0 : 1;
+          return firstPriority - secondPriority;
+        });
+
+        for (const signal of orderedSignals) {
           const payload = signal.payload as SignalPayload;
           if (!payload || typeof payload !== "object") continue;
-          await handleSignal(activeTodoId, payload);
+          try {
+            await handleSignal(activeTodoId, payload);
+          } catch (signalError) {
+            pushDebugMessage(
+              `Signal handling error: ${(signalError as Error).message || "Unknown error"}`,
+            );
+          }
         }
       } catch (pollError) {
         if (!cancelled) {
