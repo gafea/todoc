@@ -3,7 +3,6 @@ import path from "path";
 import { PrismaClient } from "@prisma/client";
 
 const SQLITE_PREFIX = "file:";
-const VERCEL_TMP_DIR = "/tmp";
 
 const getWorkspaceRoot = () => process.env.PROJECT_ROOT ?? process.cwd();
 
@@ -36,7 +35,6 @@ const resolveSqlitePath = () => {
   }
 
   let sqlitePath = rawUrl.slice(SQLITE_PREFIX.length);
-
   if (!sqlitePath || sqlitePath.startsWith(":")) {
     return null;
   }
@@ -50,50 +48,69 @@ const resolveSqlitePath = () => {
 
   const workspaceRoot = getWorkspaceRoot();
   const prismaSchemaDir = getPrismaSchemaDir(workspaceRoot);
-  const originalAbsolutePath = path.isAbsolute(sqlitePath)
+  const absolutePath = path.isAbsolute(sqlitePath)
     ? sqlitePath
     : path.resolve(prismaSchemaDir, sqlitePath);
-  let absolutePath = originalAbsolutePath;
-
-  const isVercelProduction =
-    process.env.VERCEL === "1" && process.env.NODE_ENV === "production";
-  if (isVercelProduction && !absolutePath.startsWith(VERCEL_TMP_DIR)) {
-    const dbFileName = path.basename(absolutePath);
-    absolutePath = path.join(VERCEL_TMP_DIR, "prisma", dbFileName);
-  }
 
   const normalized = absolutePath.split(path.sep).join("/");
-  return { normalized, absolutePath, query, originalAbsolutePath };
+  return { normalized, absolutePath, query };
 };
 
-const ensureSqliteFile = (absolutePath: string, originalAbsolutePath: string) => {
+const ensureSqliteFile = (absolutePath: string) => {
   const directory = path.dirname(absolutePath);
   fs.mkdirSync(directory, { recursive: true });
 
   if (!fs.existsSync(absolutePath)) {
-    if (
-      absolutePath !== originalAbsolutePath &&
-      fs.existsSync(originalAbsolutePath)
-    ) {
-      fs.copyFileSync(originalAbsolutePath, absolutePath);
-      return;
-    }
-
     fs.closeSync(fs.openSync(absolutePath, "w"));
   }
 };
 
-const bootstrapDatabaseEnv = () => {
+const bootstrapLocalSqliteEnv = () => {
   const resolved = resolveSqlitePath();
   if (!resolved) {
     return;
   }
 
-  ensureSqliteFile(resolved.absolutePath, resolved.originalAbsolutePath);
+  ensureSqliteFile(resolved.absolutePath);
   process.env.DATABASE_URL = `${SQLITE_PREFIX}${resolved.normalized}${resolved.query}`;
 };
 
-bootstrapDatabaseEnv();
+const getDatabaseMode = () => {
+  const rawUrl = process.env.DATABASE_URL ?? "";
+  if (rawUrl.startsWith(SQLITE_PREFIX)) {
+    return "local-sqlite";
+  }
+
+  if (process.env.VERCEL === "1") {
+    return "vercel-postgres";
+  }
+
+  return "external-postgres";
+};
+
+const getDatabaseTarget = () => {
+  const rawUrl = process.env.DATABASE_URL ?? "";
+  if (!rawUrl) {
+    return "unset";
+  }
+
+  if (rawUrl.startsWith(SQLITE_PREFIX)) {
+    return rawUrl.slice(SQLITE_PREFIX.length);
+  }
+
+  try {
+    const parsed = new URL(rawUrl);
+    return `${parsed.host}${parsed.pathname}`;
+  } catch {
+    return "configured";
+  }
+};
+
+bootstrapLocalSqliteEnv();
+
+console.info(
+  `[db] startup mode=${getDatabaseMode()} target=${getDatabaseTarget()}`,
+);
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
