@@ -1,4 +1,24 @@
+@import url("https://fonts.googleapis.com/css2?family=Google+Sans:ital,opsz,wght@0,17..18,400..700;1,17..18,400..700&display=swap");
 @import "tailwindcss";
+
+@font-face {
+  font-family: "Product Sans";
+  src:
+    local("Product Sans"), local("Google Sans"), local("ProductSans-Regular");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Product Sans";
+  src:
+    local("Product Sans Bold"), local("Google Sans Bold"),
+    local("ProductSans-Bold");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
   --background: #ffffff;
@@ -8,8 +28,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans:
+    "Product Sans", "Google Sans", "Segoe UI", "Inter", Arial, sans-serif;
+  --font-mono: "SFMono-Regular", "Menlo", "Monaco", monospace;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,5 +43,17 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Product Sans", "Google Sans", "Segoe UI", Arial, sans-serif;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-weight: 700;
 }
