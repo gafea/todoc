@@ -2,26 +2,20 @@ This is a [Next.js](https://nextjs.org) todo app with passkey-only authenticatio
 
 ## Getting Started
 
-1. Copy environment variables:
-
-```bash
-cp .env.example .env
-```
-
-2. Install dependencies:
+1. Install dependencies:
 
 ```bash
 npm install
 ```
 
-3. Create the database and generate Prisma client:
+2. Create the database and generate Prisma client:
 
 ```bash
 npm run prisma:migrate -- --name init
 npm run prisma:generate
 ```
 
-4. Run the development server:
+3. Run the development server:
 
 ```bash
 npm run dev
