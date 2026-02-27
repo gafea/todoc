@@ -33,7 +33,8 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-If `APP_BASE_URL` is a localhost URL (for example `http://localhost:4000`), `npm run dev` and `npm run start` automatically use that port.
+If `PORT` is set, `npm run dev` and `npm run start` always use it.
+Otherwise, if `APP_BASE_URL` is a localhost URL (for example `http://localhost:4000`), those commands use that port.
 
 Auth routes are under `app/api/auth/*`.
 
@@ -42,6 +43,7 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 ## Environment Notes
 
 - `APP_BASE_URL` should match the app origin used in browser.
+- `PORT` (optional) overrides the server port for `npm run dev` and `npm run start`.
 - `RP_ID` is usually `localhost` in local development.
 - `SECRET_COOKIE_PASSWORD` must be at least 32 characters.
 

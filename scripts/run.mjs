@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 
-function readAppBaseUrlFromDotEnv() {
+function readDotEnvVar(name) {
   try {
     const envPath = join(process.cwd(), ".env");
     const raw = readFileSync(envPath, "utf8");
@@ -15,7 +15,7 @@ function readAppBaseUrlFromDotEnv() {
       if (!trimmed || trimmed.startsWith("#")) {
         continue;
       }
-      const match = trimmed.match(/^APP_BASE_URL\s*=\s*(.*)$/);
+      const match = trimmed.match(new RegExp(`^${name}\\s*=\\s*(.*)$`));
       if (!match) {
         continue;
       }
@@ -34,6 +34,46 @@ function readAppBaseUrlFromDotEnv() {
   }
 
   return undefined;
+}
+
+function readAppBaseUrlFromDotEnv() {
+  return readDotEnvVar("APP_BASE_URL");
+}
+
+function readPortFromDotEnv() {
+  return readDotEnvVar("PORT");
+}
+
+function normalizePort(value) {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = String(value).trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return undefined;
+  }
+
+  const num = Number(trimmed);
+  if (num < 1 || num > 65535) {
+    return undefined;
+  }
+
+  return String(num);
+}
+
+function resolvePreferredPort() {
+  const portFromEnv = normalizePort(process.env.PORT);
+  if (portFromEnv) {
+    return portFromEnv;
+  }
+
+  const portFromDotEnv = normalizePort(readPortFromDotEnv());
+  if (portFromDotEnv) {
+    return portFromDotEnv;
+  }
+
+  return resolveLocalhostPort();
 }
 
 function resolveLocalhostPort() {
@@ -70,7 +110,7 @@ if (mode !== "dev" && mode !== "start") {
 }
 
 const nextArgs = [mode];
-const port = resolveLocalhostPort();
+const port = resolvePreferredPort();
 if (port) {
   nextArgs.push("-p", port);
 }
