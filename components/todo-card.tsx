@@ -25,8 +25,13 @@ export function TodoCard({
   extraInfo,
   footerAction,
 }: TodoCardProps) {
+  const isSharedCompletedLocked =
+    isOwnedByCurrentUser && Boolean(todo.sharedWithUserId) && todo.completed;
+
   const showCompleteButton =
-    isOwnedByCurrentUser && !todo.sharedWithUserId && Boolean(onToggleComplete);
+    isOwnedByCurrentUser &&
+    Boolean(onToggleComplete) &&
+    (!todo.sharedWithUserId || isSharedCompletedLocked);
 
   return (
     <article
@@ -110,8 +115,13 @@ export function TodoCard({
       {showCompleteButton ? (
         <button
           type="button"
-          onClick={() => onToggleComplete?.(todo)}
-          disabled={isMutating}
+          onClick={() => {
+            if (isSharedCompletedLocked) {
+              return;
+            }
+            onToggleComplete?.(todo);
+          }}
+          disabled={isMutating || isSharedCompletedLocked}
           className={`w-full px-3 py-2 rounded-md text-sm inline-flex items-center justify-center gap-2 ${
             todo.completed
               ? "bg-zinc-200 dark:bg-zinc-800"

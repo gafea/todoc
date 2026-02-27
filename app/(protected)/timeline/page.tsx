@@ -38,11 +38,15 @@ type SignalPayload =
   | {
       type: "ice";
       candidate: RTCIceCandidateInit;
+    }
+  | {
+      type: "switched_call";
+      toTodoId?: string;
     };
 
 const formatCountdown = (differenceMs: number) => {
   if (differenceMs <= 0) {
-    return "Starting now";
+    return "now";
   }
 
   const totalSeconds = Math.floor(differenceMs / 1000);
@@ -92,6 +96,13 @@ export default function TimelinePage() {
   const [localVolumeLevel, setLocalVolumeLevel] = useState(0);
   const [remoteVolumeLevel, setRemoteVolumeLevel] = useState(0);
   const [isRemoteMuted, setIsRemoteMuted] = useState(false);
+  const [isRemoteVideoReady, setIsRemoteVideoReady] = useState(false);
+  const [remotePresenceState, setRemotePresenceState] = useState<
+    "connecting" | "online" | "offline"
+  >("connecting");
+  const [remoteWindowMessage, setRemoteWindowMessage] = useState<string | null>(
+    null,
+  );
   const [iceConnectionState, setIceConnectionState] =
     useState<RTCIceConnectionState>("new");
   const [signalingState, setSignalingState] =
@@ -115,6 +126,78 @@ export default function TimelinePage() {
   const isPollingRef = useRef(false);
   const isRefreshingRef = useRef(false);
   const suppressAutoStartUntilRef = useRef(0);
+  const completionHideTimersRef = useRef<Record<string, number>>({});
+  const remoteWindowMessageTimerRef = useRef<number | null>(null);
+  const remotePresenceTimeoutRef = useRef<number | null>(null);
+
+  const markRemoteOnline = useCallback(() => {
+    setRemotePresenceState("online");
+    if (remotePresenceTimeoutRef.current !== null) {
+      window.clearTimeout(remotePresenceTimeoutRef.current);
+      remotePresenceTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleHideCompletedTodo = useCallback((todoId: string) => {
+    const existingTimer = completionHideTimersRef.current[todoId];
+    if (existingTimer) {
+      window.clearTimeout(existingTimer);
+    }
+
+    completionHideTimersRef.current[todoId] = window.setTimeout(() => {
+      setTodos((current) => current.filter((todo) => todo.id !== todoId));
+      delete completionHideTimersRef.current[todoId];
+    }, 5000);
+  }, []);
+
+  const showCompletedTemporarily = useCallback(
+    (todoId: string, fallbackSource: "mine" | "shared" = "shared") => {
+      let found = false;
+
+      setTodos((current) => {
+        const updated = current.map((todo) => {
+          if (todo.id !== todoId) {
+            return todo;
+          }
+
+          found = true;
+          return {
+            ...todo,
+            completed: true,
+          };
+        });
+
+        return updated;
+      });
+
+      if (!found) {
+        void fetchTodos()
+          .then((payload) => {
+            const matched = [...payload.owned, ...payload.sharedWithMe].find(
+              (todo) => todo.id === todoId,
+            );
+
+            if (!matched || !matched.completed || !matched.dueAt) {
+              return;
+            }
+
+            setTodos((current) => {
+              if (current.some((todo) => todo.id === todoId)) {
+                return current;
+              }
+
+              const source =
+                matched.ownerId === currentUserId ? "mine" : fallbackSource;
+              return [...current, { ...matched, source }];
+            });
+          })
+          .catch(() => {});
+      }
+
+      scheduleHideCompletedTodo(todoId);
+    },
+    [currentUserId, scheduleHideCompletedTodo],
+  );
 
   const stopAudioMonitoring = useCallback((target: "local" | "remote") => {
     const isLocal = target === "local";
@@ -270,6 +353,13 @@ export default function TimelinePage() {
     setSignalingState("stable");
     setConnectionState("new");
     setIsMicMuted(false);
+    setIsRemoteVideoReady(false);
+    setRemotePresenceState("connecting");
+
+    if (remotePresenceTimeoutRef.current !== null) {
+      window.clearTimeout(remotePresenceTimeoutRef.current);
+      remotePresenceTimeoutRef.current = null;
+    }
   }, [pushDebugMessage]);
 
   const load = useCallback(async () => {
@@ -349,8 +439,29 @@ export default function TimelinePage() {
   }, [load]);
 
   const handleSignal = useCallback(
-    async (todoId: string, payload: SignalPayload) => {
+    async (todoId: string, payload: SignalPayload, fromUserId?: string) => {
       const connection = peerConnectionRef.current;
+
+      if (payload.type === "switched_call") {
+        const switchedMessage = `${fromUserId ?? "Remote user"} has switched to another call.`;
+        setNotice(switchedMessage);
+        setRemoteWindowMessage(switchedMessage);
+        if (remoteWindowMessageTimerRef.current !== null) {
+          window.clearTimeout(remoteWindowMessageTimerRef.current);
+        }
+        remoteWindowMessageTimerRef.current = window.setTimeout(() => {
+          setRemoteWindowMessage(null);
+          remoteWindowMessageTimerRef.current = null;
+        }, 5000);
+        suppressAutoStartUntilRef.current = Date.now() + 8000;
+        releaseMediaResources();
+        setActiveTodoId(null);
+        setActiveCallSession(null);
+        setCallRole(null);
+        pushDebugMessage("Remote user switched to another call");
+        return;
+      }
+
       if (!connection) return;
 
       const flushPendingIceCandidates = async () => {
@@ -434,7 +545,7 @@ export default function TimelinePage() {
         }
       }
     },
-    [pushDebugMessage],
+    [pushDebugMessage, releaseMediaResources],
   );
 
   const setupPeerConnection = useCallback(
@@ -474,6 +585,9 @@ export default function TimelinePage() {
       const remoteStream = new MediaStream();
       localStreamRef.current = stream;
       remoteStreamRef.current = remoteStream;
+      setIsRemoteVideoReady(false);
+      setRemotePresenceState("connecting");
+      setRemoteWindowMessage(null);
 
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
@@ -487,6 +601,7 @@ export default function TimelinePage() {
 
       connection.ontrack = (event) => {
         pushDebugMessage("Remote track received");
+        markRemoteOnline();
         event.streams[0]?.getTracks().forEach((track) => {
           remoteStream.addTrack(track);
         });
@@ -518,6 +633,9 @@ export default function TimelinePage() {
       connection.onconnectionstatechange = () => {
         setConnectionState(connection.connectionState);
         pushDebugMessage(`Connection state: ${connection.connectionState}`);
+        if (connection.connectionState === "connected") {
+          markRemoteOnline();
+        }
       };
 
       peerConnectionRef.current = connection;
@@ -548,6 +666,7 @@ export default function TimelinePage() {
       pushDebugMessage,
       releaseMediaResources,
       startAudioMonitoring,
+      markRemoteOnline,
     ],
   );
 
@@ -555,6 +674,24 @@ export default function TimelinePage() {
     async (todo: TimelineTodo) => {
       if (!todo.dueAt || !todo.sharedWithUserId || todo.completed) {
         return;
+      }
+
+      const connectionFailed =
+        ["failed", "disconnected", "closed"].includes(connectionState) ||
+        ["failed", "disconnected", "closed"].includes(iceConnectionState);
+
+      if (activeTodoId === todo.id && !connectionFailed) {
+        return;
+      }
+
+      if (activeTodoId === todo.id && connectionFailed) {
+        pushDebugMessage(
+          `Rebuilding call for todo ${todo.id} after connection failure`,
+        );
+        releaseMediaResources();
+        setActiveTodoId(null);
+        setActiveCallSession(null);
+        setCallRole(null);
       }
 
       const startAtMs = getMeetingStartAtMs(todo);
@@ -570,6 +707,22 @@ export default function TimelinePage() {
         setNotice(null);
         setIsPreparingCall(true);
         setDebugMessages([]);
+
+        if (activeTodoId && activeTodoId !== todo.id) {
+          try {
+            await sendCallSignal(activeTodoId, {
+              type: "switched_call",
+              toTodoId: todo.id,
+            });
+          } catch {}
+
+          releaseMediaResources();
+          setActiveTodoId(null);
+          setActiveCallSession(null);
+          setCallRole(null);
+          pushDebugMessage(`Switching from call ${activeTodoId} to ${todo.id}`);
+        }
+
         pushDebugMessage(`Starting or joining call for todo ${todo.id}`);
 
         const started = await startCallForTodo(todo.id);
@@ -594,7 +747,14 @@ export default function TimelinePage() {
         isStartingRef.current = false;
       }
     },
-    [pushDebugMessage, releaseMediaResources, setupPeerConnection],
+    [
+      activeTodoId,
+      connectionState,
+      iceConnectionState,
+      pushDebugMessage,
+      releaseMediaResources,
+      setupPeerConnection,
+    ],
   );
 
   const sortedTodos = useMemo(() => {
@@ -671,10 +831,30 @@ export default function TimelinePage() {
 
         if (!callData.session || callData.session.status !== "active") {
           pushDebugMessage("Call session is no longer active");
+          const endedTodoId = activeTodoId;
+          const endedTodoSource =
+            activeTodo?.ownerId === currentUserId ? "mine" : "shared";
           releaseMediaResources();
           setActiveCallSession(callData.session);
           setActiveTodoId(null);
           setCallRole(null);
+
+          void fetchTodos()
+            .then((payload) => {
+              const endedTodo = [
+                ...payload.owned,
+                ...payload.sharedWithMe,
+              ].find((todo) => todo.id === endedTodoId);
+
+              if (endedTodo?.completed) {
+                showCompletedTemporarily(endedTodoId, endedTodoSource);
+              } else {
+                void load();
+              }
+            })
+            .catch(() => {
+              void load();
+            });
           return;
         }
 
@@ -691,10 +871,14 @@ export default function TimelinePage() {
         });
 
         for (const signal of orderedSignals) {
+          if (signal.fromUserId && signal.fromUserId !== currentUserId) {
+            markRemoteOnline();
+          }
+
           const payload = signal.payload as SignalPayload;
           if (!payload || typeof payload !== "object") continue;
           try {
-            await handleSignal(activeTodoId, payload);
+            await handleSignal(activeTodoId, payload, signal.fromUserId);
           } catch (signalError) {
             pushDebugMessage(
               `Signal handling error: ${(signalError as Error).message || "Unknown error"}`,
@@ -735,7 +919,54 @@ export default function TimelinePage() {
       isPollingRef.current = false;
       window.clearInterval(intervalId);
     };
-  }, [activeTodoId, handleSignal, pushDebugMessage, releaseMediaResources]);
+  }, [
+    activeTodo,
+    activeTodoId,
+    currentUserId,
+    handleSignal,
+    load,
+    markRemoteOnline,
+    pushDebugMessage,
+    releaseMediaResources,
+    showCompletedTemporarily,
+  ]);
+
+  useEffect(() => {
+    if (!activeTodoId || !activeCallSession) {
+      return;
+    }
+
+    if (remotePresenceState === "online" || isRemoteVideoReady) {
+      if (remotePresenceTimeoutRef.current !== null) {
+        window.clearTimeout(remotePresenceTimeoutRef.current);
+        remotePresenceTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    if (remotePresenceTimeoutRef.current !== null) {
+      return;
+    }
+
+    remotePresenceTimeoutRef.current = window.setTimeout(() => {
+      setRemotePresenceState((current) =>
+        current === "connecting" ? "offline" : current,
+      );
+      remotePresenceTimeoutRef.current = null;
+    }, 9000);
+
+    return () => {
+      if (remotePresenceTimeoutRef.current !== null) {
+        window.clearTimeout(remotePresenceTimeoutRef.current);
+        remotePresenceTimeoutRef.current = null;
+      }
+    };
+  }, [
+    activeCallSession,
+    activeTodoId,
+    isRemoteVideoReady,
+    remotePresenceState,
+  ]);
 
   useEffect(() => {
     if (!localStreamRef.current) {
@@ -807,7 +1038,23 @@ export default function TimelinePage() {
   ]);
 
   useEffect(() => {
+    const timersRef = completionHideTimersRef;
+
     return () => {
+      for (const timerId of Object.values(timersRef.current)) {
+        window.clearTimeout(timerId);
+      }
+
+      if (remoteWindowMessageTimerRef.current !== null) {
+        window.clearTimeout(remoteWindowMessageTimerRef.current);
+        remoteWindowMessageTimerRef.current = null;
+      }
+
+      if (remotePresenceTimeoutRef.current !== null) {
+        window.clearTimeout(remotePresenceTimeoutRef.current);
+        remotePresenceTimeoutRef.current = null;
+      }
+
       stopAudioMonitoring("local");
       stopAudioMonitoring("remote");
       releaseMediaResources();
@@ -823,10 +1070,13 @@ export default function TimelinePage() {
       await endCallBySharedUser({ todoId: activeTodoId, markDone: true });
       suppressAutoStartUntilRef.current = Date.now() + 5000;
       releaseMediaResources();
+      const completedTodoId = activeTodoId;
+      const completedTodoSource =
+        activeTodo?.ownerId === currentUserId ? "mine" : "shared";
       setActiveTodoId(null);
       setActiveCallSession(null);
       setCallRole(null);
-      await load();
+      showCompletedTemporarily(completedTodoId, completedTodoSource);
       setNotice("Todo marked as done.");
     } catch (endError) {
       setError((endError as Error).message);
@@ -892,6 +1142,17 @@ export default function TimelinePage() {
     setIsMicMuted((current) => !current);
   };
 
+  const isRemoteOffline =
+    Boolean(activeTodo && activeCallSession) &&
+    (remotePresenceState === "offline" ||
+      ["failed", "disconnected", "closed"].includes(connectionState));
+
+  const showRemoteConnecting =
+    Boolean(activeTodo && activeCallSession) &&
+    !isRemoteVideoReady &&
+    !isRemoteOffline &&
+    !remoteWindowMessage;
+
   const toggleCompleted = async (todo: TodoItem) => {
     try {
       setError(null);
@@ -940,6 +1201,14 @@ export default function TimelinePage() {
                 const dueReached = canStartCallForTodo(todo);
                 const isActiveCallTodo = activeTodoId === todo.id;
                 const isClosestTodo = closestTodo?.id === todo.id;
+                const canReconnectActiveCall =
+                  isActiveCallTodo &&
+                  (["failed", "disconnected", "closed"].includes(
+                    connectionState,
+                  ) ||
+                    ["failed", "disconnected", "closed"].includes(
+                      iceConnectionState,
+                    ));
 
                 return (
                   <TodoCard
@@ -969,24 +1238,28 @@ export default function TimelinePage() {
                     }
                     footerAction={
                       todo.sharedWithUserId ? (
-                        <button
-                          type="button"
-                          disabled={!dueReached || isPreparingCall}
-                          onClick={() => startOrJoinCall(todo)}
-                          className={`w-full px-3 py-2 rounded-md text-sm ${
-                            isActiveCallTodo
-                              ? "bg-emerald-600 text-white"
+                        todo.completed ? null : (
+                          <button
+                            type="button"
+                            disabled={!dueReached || isPreparingCall}
+                            onClick={() => startOrJoinCall(todo)}
+                            className={`w-full px-3 py-2 rounded-md text-sm ${
+                              isActiveCallTodo
+                                ? "bg-emerald-600 text-white"
+                                : dueReached
+                                  ? "bg-blue-600 hover:bg-blue-700 text-white"
+                                  : "bg-transparent border border-zinc-300 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400"
+                            }`}
+                          >
+                            {isActiveCallTodo
+                              ? canReconnectActiveCall
+                                ? "Reconnect Call"
+                                : "Call Active"
                               : dueReached
-                                ? "bg-blue-600 hover:bg-blue-700 text-white"
-                                : "bg-transparent border border-zinc-300 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400"
-                          }`}
-                        >
-                          {isActiveCallTodo
-                            ? "Call Active"
-                            : dueReached
-                              ? "Start / Join Call"
-                              : "Call starts at configured pre-meeting time"}
-                        </button>
+                                ? "Start / Join Call"
+                                : "Call starts at configured pre-meeting time"}
+                          </button>
+                        )
                       ) : null
                     }
                   />
@@ -1006,7 +1279,7 @@ export default function TimelinePage() {
           ) : (
             <>
               <div className="grid grid-cols-1 gap-3">
-                <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-black/90 overflow-hidden">
+                <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-black/90 overflow-hidden relative">
                   <div className="px-3 py-2 text-xs text-zinc-200 bg-zinc-900/80 border-b border-zinc-700 flex items-center justify-between gap-2">
                     <span>Remote: {remoteUserId ?? "Unknown"}</span>
                     <div className="flex items-center gap-2 min-w-28">
@@ -1030,7 +1303,31 @@ export default function TimelinePage() {
                     autoPlay
                     playsInline
                     className="w-full aspect-video"
+                    onPlaying={() => {
+                      setIsRemoteVideoReady(true);
+                      markRemoteOnline();
+                    }}
                   />
+                  {(showRemoteConnecting ||
+                    isRemoteOffline ||
+                    remoteWindowMessage) && (
+                    <div className="absolute inset-x-0 bottom-0 top-9 flex items-center justify-center bg-black/55 px-4 text-center">
+                      {remoteWindowMessage ? (
+                        <p className="text-sm text-zinc-100 font-medium">
+                          {remoteWindowMessage}
+                        </p>
+                      ) : isRemoteOffline ? (
+                        <p className="text-sm text-zinc-100 font-medium">
+                          Remote user is offline.
+                        </p>
+                      ) : (
+                        <div className="flex flex-col items-center gap-2 text-zinc-100">
+                          <span className="h-8 w-8 rounded-full border-2 border-zinc-300 border-t-emerald-400 animate-spin" />
+                          <p className="text-sm">Connecting to remote video…</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-black/90 overflow-hidden">

@@ -167,6 +167,18 @@ export async function PATCH(
           { status: 400 },
         );
       }
+
+      if (
+        existingTodo.sharedWithUserId &&
+        existingTodo.completed &&
+        body.completed === false
+      ) {
+        return NextResponse.json(
+          { error: "Shared completed todos cannot be marked as incomplete" },
+          { status: 400 },
+        );
+      }
+
       data.completed = body.completed;
     }
 

@@ -104,6 +104,12 @@ export async function POST(
     callSession = existing;
   }
 
+  await prisma.callSignal.deleteMany({
+    where: {
+      callSessionId: callSession.id,
+    },
+  });
+
   return NextResponse.json({
     session: serializeSession(callSession),
     role: session.userId === todo.ownerId ? "A" : "B",
