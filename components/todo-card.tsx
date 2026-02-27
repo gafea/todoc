@@ -89,7 +89,7 @@ export function TodoCard({
         </p>
       ) : null}
 
-      {todo.dueAt && (
+      {todo.dueAt && todo.sharedWithUserId && (
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Meeting starts on{" "}
           {new Date(

@@ -775,20 +775,25 @@ export default function TimelinePage() {
     );
   }, [nowMs, sortedTodos]);
 
-  const closestTodo = useMemo(() => {
-    const upcoming = sortedTodos.find((todo) => {
-      if (todo.completed) {
+  const closestSharedTodo = useMemo(() => {
+    const upcomingShared = sortedTodos.find((todo) => {
+      if (todo.completed || !todo.sharedWithUserId) {
         return false;
       }
 
       const startAtMs = getMeetingStartAtMs(todo);
       return (startAtMs ?? Number.MAX_SAFE_INTEGER) >= nowMs;
     });
-    if (upcoming) {
-      return upcoming;
+
+    if (upcomingShared) {
+      return upcomingShared;
     }
 
-    return sortedTodos.find((todo) => !todo.completed) ?? null;
+    return (
+      sortedTodos.find(
+        (todo) => !todo.completed && Boolean(todo.sharedWithUserId),
+      ) ?? null
+    );
   }, [nowMs, sortedTodos]);
 
   const activeTodo = useMemo(
@@ -1200,7 +1205,7 @@ export default function TimelinePage() {
               {sortedTodos.map((todo) => {
                 const dueReached = canStartCallForTodo(todo);
                 const isActiveCallTodo = activeTodoId === todo.id;
-                const isClosestTodo = closestTodo?.id === todo.id;
+                const isClosestSharedTodo = closestSharedTodo?.id === todo.id;
                 const canReconnectActiveCall =
                   isActiveCallTodo &&
                   (["failed", "disconnected", "closed"].includes(
@@ -1227,7 +1232,7 @@ export default function TimelinePage() {
                       void toggleCompleted(targetTodo);
                     }}
                     extraInfo={
-                      isClosestTodo ? (
+                      isClosestSharedTodo ? (
                         <p className="text-xs text-amber-600 dark:text-amber-300 font-medium">
                           Next Meeting Starts in{" "}
                           {formatCountdown(
