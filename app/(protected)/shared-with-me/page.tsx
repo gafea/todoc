@@ -168,9 +168,9 @@ export default function SharedWithMePage() {
                   key={ownerId}
                   className="w-80 shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-3"
                 >
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center justify-between gap-2">
                     <div>
-                      <h2 className="font-semibold break-all">{ownerId}</h2>
+                      <h2 className="font-semibold">{ownerId}</h2>
                     </div>
                     {isBanned ? (
                       <button
@@ -200,11 +200,6 @@ export default function SharedWithMePage() {
                         todo={todo}
                         isOwnedByCurrentUser={false}
                         isMutating={isMutating}
-                        dueText={
-                          todo.dueAt
-                            ? `Due: ${new Date(todo.dueAt).toLocaleString()}`
-                            : "Due: Not set"
-                        }
                         footerAction={
                           <button
                             type="button"

@@ -19,6 +19,22 @@ const parseDueAt = (dueAt: unknown) => {
   return parsedDate;
 };
 
+const parseStartMeetingBeforeMin = (value: unknown) => {
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
+
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new Error("Invalid startMeetingBeforeMin value");
+  }
+
+  if (value < 0 || value > 1440) {
+    throw new Error("startMeetingBeforeMin must be between 0 and 1440");
+  }
+
+  return value;
+};
+
 const parseSharedWithUserId = async (
   rawValue: unknown,
   ownerId: string,
@@ -71,6 +87,7 @@ const serializeTodo = (todo: {
   description: string;
   completed: boolean;
   dueAt: Date | null;
+  startMeetingBeforeMin: number;
   createdAt: Date;
   ownerId: string;
   sharedWithUserId: string | null;
@@ -80,6 +97,7 @@ const serializeTodo = (todo: {
   description: todo.description,
   completed: todo.completed,
   dueAt: todo.dueAt?.toISOString() ?? null,
+  startMeetingBeforeMin: todo.startMeetingBeforeMin,
   createdAt: todo.createdAt.toISOString(),
   ownerId: todo.ownerId,
   sharedWithUserId: todo.sharedWithUserId,
@@ -119,6 +137,7 @@ export async function PATCH(
       completed?: boolean;
       dueAt?: Date | null;
       sharedWithUserId?: string | null;
+      startMeetingBeforeMin?: number;
     } = {};
 
     if ("text" in body) {
@@ -160,6 +179,23 @@ export async function PATCH(
         body.sharedWithUserId,
         session.userId,
       );
+    }
+
+    if ("startMeetingBeforeMin" in body) {
+      data.startMeetingBeforeMin = parseStartMeetingBeforeMin(
+        body.startMeetingBeforeMin,
+      );
+    }
+
+    const nextDueAt =
+      "dueAt" in data ? data.dueAt : (existingTodo.dueAt ?? null);
+    const nextSharedWithUserId =
+      "sharedWithUserId" in data
+        ? data.sharedWithUserId
+        : existingTodo.sharedWithUserId;
+
+    if (nextSharedWithUserId && !nextDueAt) {
+      throw new Error("Due date & time is required for shared todos");
     }
 
     const updatedTodo = await prisma.todo.update({

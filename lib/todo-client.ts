@@ -4,6 +4,7 @@ export interface TodoItem {
   description: string;
   completed: boolean;
   dueAt: string | null;
+  startMeetingBeforeMin: number;
   createdAt: string;
   ownerId: string;
   sharedWithUserId: string | null;
@@ -42,6 +43,7 @@ export const createTodo = async (input: {
   description: string;
   dueAt: string | null;
   sharedWithUserId: string | null;
+  startMeetingBeforeMin: number;
 }) => {
   const response = await fetch("/api/todos", {
     method: "POST",
@@ -64,6 +66,7 @@ export const updateTodo = async (
     completed: boolean;
     dueAt: string | null;
     sharedWithUserId: string | null;
+    startMeetingBeforeMin: number;
   }>,
 ) => {
   const response = await fetch(`/api/todos/${id}`, {

@@ -19,6 +19,22 @@ const parseDueAt = (dueAt: unknown) => {
   return parsedDate;
 };
 
+const parseStartMeetingBeforeMin = (value: unknown) => {
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
+
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new Error("Invalid startMeetingBeforeMin value");
+  }
+
+  if (value < 0 || value > 1440) {
+    throw new Error("startMeetingBeforeMin must be between 0 and 1440");
+  }
+
+  return value;
+};
+
 const parseSharedWithUserId = async (
   rawValue: unknown,
   ownerId: string,
@@ -71,6 +87,7 @@ const serializeTodo = (todo: {
   description: string;
   completed: boolean;
   dueAt: Date | null;
+  startMeetingBeforeMin: number;
   createdAt: Date;
   ownerId: string;
   sharedWithUserId: string | null;
@@ -80,6 +97,7 @@ const serializeTodo = (todo: {
   description: todo.description,
   completed: todo.completed,
   dueAt: todo.dueAt?.toISOString() ?? null,
+  startMeetingBeforeMin: todo.startMeetingBeforeMin,
   createdAt: todo.createdAt.toISOString(),
   ownerId: todo.ownerId,
   sharedWithUserId: todo.sharedWithUserId,
@@ -141,6 +159,13 @@ export async function POST(request: NextRequest) {
       Promise.resolve(parseDueAt(body?.dueAt)),
       parseSharedWithUserId(body?.sharedWithUserId, session.userId),
     ]);
+    const startMeetingBeforeMin = parseStartMeetingBeforeMin(
+      body?.startMeetingBeforeMin,
+    );
+
+    if (sharedWithUserId && !dueAt) {
+      throw new Error("Due date & time is required for shared todos");
+    }
 
     const todo = await prisma.todo.create({
       data: {
@@ -148,6 +173,7 @@ export async function POST(request: NextRequest) {
         description,
         completed: false,
         dueAt,
+        startMeetingBeforeMin,
         ownerId: session.userId,
         sharedWithUserId,
       },

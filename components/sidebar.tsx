@@ -35,6 +35,7 @@ export function Sidebar() {
   const [sharedWithUserId, setSharedWithUserId] = useState("");
   const [shouldSetDateTime, setShouldSetDateTime] = useState(true);
   const [dueAtInput, setDueAtInput] = useState("");
+  const [startMeetingBeforeMin, setStartMeetingBeforeMin] = useState(0);
 
   const getNowDateTimeLocal = () => {
     const now = new Date();
@@ -48,6 +49,7 @@ export function Sidebar() {
     setSharedWithUserId("");
     setShouldSetDateTime(true);
     setDueAtInput(getNowDateTimeLocal());
+    setStartMeetingBeforeMin(0);
     setCreateError(null);
   };
 
@@ -108,6 +110,7 @@ export function Sidebar() {
       setSharedWithUserId("");
       setShouldSetDateTime(true);
       setDueAtInput(now.toISOString().slice(0, 16));
+      setStartMeetingBeforeMin(0);
       setCreateError(null);
     };
 
@@ -124,10 +127,20 @@ export function Sidebar() {
   }, [isCreateOpen]);
 
   const minDateTime = getNowDateTimeLocal();
+  const isSharedTodo = sharedWithUserId.trim().length > 0;
 
   const handleCreateSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!text.trim()) {
+      return;
+    }
+
+    const selectedDueAt = shouldSetDateTime
+      ? localDateTimeInputToIso(dueAtInput)
+      : null;
+
+    if (sharedWithUserId.trim() && !selectedDueAt) {
+      setCreateError("Due date & time is required for shared todos");
       return;
     }
 
@@ -138,7 +151,8 @@ export function Sidebar() {
       await createTodo({
         text: text.trim(),
         description: description.trim(),
-        dueAt: shouldSetDateTime ? localDateTimeInputToIso(dueAtInput) : null,
+        dueAt: selectedDueAt,
+        startMeetingBeforeMin: shouldSetDateTime ? startMeetingBeforeMin : 0,
         sharedWithUserId: sharedWithUserId.trim() || null,
       });
 
@@ -155,7 +169,7 @@ export function Sidebar() {
 
   return (
     <aside className="w-full md:w-64 border-b md:border-b-0 md:border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-      <div className="p-4 px-3 md:p-4">
+      <div className="p-4 px-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
             Todo
@@ -240,7 +254,13 @@ export function Sidebar() {
               <input
                 type="text"
                 value={sharedWithUserId}
-                onChange={(event) => setSharedWithUserId(event.target.value)}
+                onChange={(event) => {
+                  const nextSharedWithUserId = event.target.value;
+                  setSharedWithUserId(nextSharedWithUserId);
+                  if (nextSharedWithUserId.trim().length > 0) {
+                    setShouldSetDateTime(true);
+                  }
+                }}
                 placeholder="Share with user UUID (optional)"
                 className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent"
               />
@@ -249,8 +269,9 @@ export function Sidebar() {
                 <span>Set date & time</span>
                 <button
                   type="button"
+                  disabled={isSharedTodo}
                   onClick={() => setShouldSetDateTime((current) => !current)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-60 ${
                     shouldSetDateTime
                       ? "bg-blue-600"
                       : "bg-zinc-300 dark:bg-zinc-700"
@@ -265,13 +286,39 @@ export function Sidebar() {
               </label>
 
               {shouldSetDateTime ? (
-                <input
-                  type="datetime-local"
-                  min={minDateTime}
-                  value={dueAtInput}
-                  onChange={(event) => setDueAtInput(event.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent"
-                />
+                <>
+                  <input
+                    type="datetime-local"
+                    min={minDateTime}
+                    value={dueAtInput}
+                    onChange={(event) => setDueAtInput(event.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent"
+                  />
+
+                  {isSharedTodo ? (
+                    <label className="flex items-center justify-between text-sm text-zinc-600 dark:text-zinc-300 gap-3">
+                      <span>Start meeting before</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={0}
+                          max={1440}
+                          value={startMeetingBeforeMin}
+                          onChange={(event) => {
+                            const parsed = Number(event.target.value);
+                            setStartMeetingBeforeMin(
+                              Number.isFinite(parsed) && parsed >= 0
+                                ? Math.min(1440, Math.floor(parsed))
+                                : 0,
+                            );
+                          }}
+                          className="w-28 px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent"
+                        />
+                        <span>min</span>
+                      </div>
+                    </label>
+                  ) : null}
+                </>
               ) : null}
 
               <div className="flex justify-end gap-2 pt-2">
@@ -307,7 +354,7 @@ export function Sidebar() {
             className="px-3 py-1.5 text-xs rounded-md border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1"
           >
             <Copy size={14} />
-            {copyState === "copied" ? "Copied!" : "Copy"}
+            {copyState === "copied" ? "Copied!" : "Copy ID"}
           </button>
           <button
             type="button"

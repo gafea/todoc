@@ -64,7 +64,11 @@ export async function POST(
     );
   }
 
-  if (todo.dueAt.getTime() > Date.now()) {
+  const startMeetingBeforeMs =
+    Math.max(0, todo.startMeetingBeforeMin ?? 0) * 60 * 1000;
+  const callStartAtMs = todo.dueAt.getTime() - startMeetingBeforeMs;
+
+  if (callStartAtMs > Date.now()) {
     return NextResponse.json(
       { error: "Call can only start when due date/time is reached" },
       { status: 400 },

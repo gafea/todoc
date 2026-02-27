@@ -1,0 +1,1 @@
+ALTER TABLE "Todo" ADD COLUMN "startMeetingBeforeMin" INTEGER NOT NULL DEFAULT 0;

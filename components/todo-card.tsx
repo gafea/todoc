@@ -9,8 +9,6 @@ type TodoCardProps = {
   onEdit?: (todo: TodoItem) => void;
   onDelete?: (todo: TodoItem) => void;
   onToggleComplete?: (todo: TodoItem) => void;
-  dueText?: string;
-  metaText?: string;
   className?: string;
   extraInfo?: ReactNode;
   footerAction?: ReactNode;
@@ -23,8 +21,6 @@ export function TodoCard({
   onEdit,
   onDelete,
   onToggleComplete,
-  dueText,
-  metaText,
   className,
   extraInfo,
   footerAction,
@@ -36,34 +32,43 @@ export function TodoCard({
     <article
       className={`rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-3 ${className ?? ""}`.trim()}
     >
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-center justify-between gap-2">
         <h3
-          className={`font-medium break-words ${todo.completed ? "line-through text-zinc-500" : ""}`.trim()}
+          className={`font-medium break-words gap-2 ${todo.completed ? "line-through text-zinc-500" : ""}`.trim()}
         >
           {todo.text}
+          {extraInfo}
         </h3>
 
         {isOwnedByCurrentUser ? (
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              disabled={!onEdit || isMutating}
-              onClick={() => onEdit?.(todo)}
-              className="p-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
-              aria-label="Edit todo"
-            >
-              <Pencil size={16} />
-            </button>
-            <button
-              type="button"
-              disabled={!onDelete || isMutating}
-              onClick={() => onDelete?.(todo)}
-              className="p-2 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 text-red-500 disabled:opacity-50"
-              aria-label="Delete todo"
-            >
-              <Trash2 size={16} />
-            </button>
-          </div>
+          onEdit && onDelete ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                disabled={!onEdit || isMutating}
+                onClick={() => onEdit?.(todo)}
+                className="p-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+                aria-label="Edit todo"
+              >
+                <Pencil size={16} />
+              </button>
+              <button
+                type="button"
+                disabled={!onDelete || isMutating}
+                onClick={() => onDelete?.(todo)}
+                className="p-2 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 text-red-500 disabled:opacity-50"
+                aria-label="Delete todo"
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] px-2 py-1 rounded-full bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                Mine
+              </span>
+            </div>
+          )
         ) : (
           <div className="flex items-center gap-2">
             <span className="text-[11px] px-2 py-1 rounded-full bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
@@ -79,15 +84,28 @@ export function TodoCard({
         </p>
       ) : null}
 
-      {dueText ? (
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">{dueText}</p>
-      ) : null}
+      {todo.dueAt && (
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          Meeting starts on{" "}
+          {new Date(
+            new Date(todo.dueAt).getTime() - todo.startMeetingBeforeMin * 60000,
+          ).toLocaleString()}
+        </p>
+      )}
 
-      {extraInfo}
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        {todo.dueAt
+          ? `Due on ${new Date(todo.dueAt).toLocaleString()}`
+          : `No due date`}
+      </p>
 
-      {metaText ? (
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">{metaText}</p>
-      ) : null}
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        {isOwnedByCurrentUser
+          ? todo.sharedWithUserId
+            ? `Shared with ${todo.sharedWithUserId}`
+            : ""
+          : `Shared by ${todo.ownerId}`}
+      </p>
 
       {showCompleteButton ? (
         <button

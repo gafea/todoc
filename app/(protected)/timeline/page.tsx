@@ -1,7 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, Mic, MicOff } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { TodoCard } from "@/components/todo-card";
 import {
   CallApiError,
@@ -55,10 +62,21 @@ const formatCountdown = (differenceMs: number) => {
   return timePart;
 };
 
+const getMeetingStartAtMs = (todo: TodoItem) => {
+  if (!todo.dueAt) {
+    return null;
+  }
+
+  const dueAtMs = new Date(todo.dueAt).getTime();
+  const offsetMs = Math.max(0, todo.startMeetingBeforeMin ?? 0) * 60 * 1000;
+  return dueAtMs - offsetMs;
+};
+
 export default function TimelinePage() {
   const [todos, setTodos] = useState<TimelineTodo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeTodoId, setActiveTodoId] = useState<string | null>(null);
   const [activeCallSession, setActiveCallSession] =
@@ -71,6 +89,9 @@ export default function TimelinePage() {
   const [debugMessages, setDebugMessages] = useState<string[]>([]);
   const [isDebugExpanded, setIsDebugExpanded] = useState(false);
   const [isMicMuted, setIsMicMuted] = useState(false);
+  const [localVolumeLevel, setLocalVolumeLevel] = useState(0);
+  const [remoteVolumeLevel, setRemoteVolumeLevel] = useState(0);
+  const [isRemoteMuted, setIsRemoteMuted] = useState(false);
   const [iceConnectionState, setIceConnectionState] =
     useState<RTCIceConnectionState>("new");
   const [signalingState, setSignalingState] =
@@ -84,9 +105,127 @@ export default function TimelinePage() {
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const localAudioContextRef = useRef<AudioContext | null>(null);
+  const remoteAudioContextRef = useRef<AudioContext | null>(null);
+  const localAudioRafRef = useRef<number | null>(null);
+  const remoteAudioRafRef = useRef<number | null>(null);
+  const localTrackCleanupRef = useRef<(() => void) | null>(null);
+  const remoteTrackCleanupRef = useRef<(() => void) | null>(null);
   const isStartingRef = useRef(false);
   const isPollingRef = useRef(false);
   const isRefreshingRef = useRef(false);
+  const suppressAutoStartUntilRef = useRef(0);
+
+  const stopAudioMonitoring = useCallback((target: "local" | "remote") => {
+    const isLocal = target === "local";
+    const contextRef = isLocal ? localAudioContextRef : remoteAudioContextRef;
+    const rafRef = isLocal ? localAudioRafRef : remoteAudioRafRef;
+    const cleanupRef = isLocal ? localTrackCleanupRef : remoteTrackCleanupRef;
+
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+
+    cleanupRef.current?.();
+    cleanupRef.current = null;
+
+    if (contextRef.current) {
+      void contextRef.current.close();
+      contextRef.current = null;
+    }
+
+    if (isLocal) {
+      setLocalVolumeLevel(0);
+    } else {
+      setRemoteVolumeLevel(0);
+      setIsRemoteMuted(false);
+    }
+  }, []);
+
+  const startAudioMonitoring = useCallback(
+    (stream: MediaStream, target: "local" | "remote") => {
+      stopAudioMonitoring(target);
+
+      const track = stream.getAudioTracks()[0];
+      if (!track) {
+        if (target === "remote") {
+          setIsRemoteMuted(true);
+        }
+        return;
+      }
+
+      if (target === "remote") {
+        const updateRemoteMuted = () => {
+          setIsRemoteMuted(track.muted || track.readyState !== "live");
+        };
+
+        updateRemoteMuted();
+        track.addEventListener("mute", updateRemoteMuted);
+        track.addEventListener("unmute", updateRemoteMuted);
+        track.addEventListener("ended", updateRemoteMuted);
+
+        remoteTrackCleanupRef.current = () => {
+          track.removeEventListener("mute", updateRemoteMuted);
+          track.removeEventListener("unmute", updateRemoteMuted);
+          track.removeEventListener("ended", updateRemoteMuted);
+        };
+      }
+
+      const AudioContextCtor =
+        window.AudioContext ||
+        (window as Window & { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+
+      if (!AudioContextCtor) {
+        return;
+      }
+
+      const context = new AudioContextCtor();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.8;
+
+      const source = context.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      const data = new Uint8Array(analyser.fftSize);
+
+      const measure = () => {
+        analyser.getByteTimeDomainData(data);
+        let sumSquares = 0;
+        for (const byte of data) {
+          const normalized = byte / 128 - 1;
+          sumSquares += normalized * normalized;
+        }
+
+        const rms = Math.sqrt(sumSquares / data.length);
+        const normalizedLevel = Math.min(1, rms * 3.2);
+
+        if (target === "local") {
+          setLocalVolumeLevel(normalizedLevel);
+        } else {
+          setRemoteVolumeLevel(normalizedLevel);
+        }
+
+        const raf = requestAnimationFrame(measure);
+        if (target === "local") {
+          localAudioRafRef.current = raf;
+        } else {
+          remoteAudioRafRef.current = raf;
+        }
+      };
+
+      if (target === "local") {
+        localAudioContextRef.current = context;
+      } else {
+        remoteAudioContextRef.current = context;
+      }
+
+      measure();
+    },
+    [stopAudioMonitoring],
+  );
 
   const pushDebugMessage = useCallback((message: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -161,8 +300,8 @@ export default function TimelinePage() {
         .filter((todo) => Boolean(todo.dueAt) && !todo.completed)
         .sort(
           (first, second) =>
-            new Date(first.dueAt as string).getTime() -
-            new Date(second.dueAt as string).getTime(),
+            (getMeetingStartAtMs(first) ?? Number.MAX_SAFE_INTEGER) -
+            (getMeetingStartAtMs(second) ?? Number.MAX_SAFE_INTEGER),
         );
 
       setTodos(withDueDates);
@@ -351,6 +490,10 @@ export default function TimelinePage() {
         event.streams[0]?.getTracks().forEach((track) => {
           remoteStream.addTrack(track);
         });
+
+        if (event.streams[0]) {
+          startAudioMonitoring(event.streams[0], "remote");
+        }
       };
 
       connection.onicecandidate = async (event) => {
@@ -399,7 +542,13 @@ export default function TimelinePage() {
         pushDebugMessage("Sent offer signal");
       }
     },
-    [currentUserId, isMicMuted, pushDebugMessage, releaseMediaResources],
+    [
+      currentUserId,
+      isMicMuted,
+      pushDebugMessage,
+      releaseMediaResources,
+      startAudioMonitoring,
+    ],
   );
 
   const startOrJoinCall = useCallback(
@@ -408,7 +557,8 @@ export default function TimelinePage() {
         return;
       }
 
-      if (new Date(todo.dueAt).getTime() > Date.now()) {
+      const startAtMs = getMeetingStartAtMs(todo);
+      if (startAtMs === null || startAtMs > Date.now()) {
         return;
       }
 
@@ -417,6 +567,7 @@ export default function TimelinePage() {
       try {
         isStartingRef.current = true;
         setError(null);
+        setNotice(null);
         setIsPreparingCall(true);
         setDebugMessages([]);
         pushDebugMessage(`Starting or joining call for todo ${todo.id}`);
@@ -449,8 +600,8 @@ export default function TimelinePage() {
   const sortedTodos = useMemo(() => {
     return [...todos].sort(
       (first, second) =>
-        new Date(first.dueAt as string).getTime() -
-        new Date(second.dueAt as string).getTime(),
+        (getMeetingStartAtMs(first) ?? Number.MAX_SAFE_INTEGER) -
+        (getMeetingStartAtMs(second) ?? Number.MAX_SAFE_INTEGER),
     );
   }, [todos]);
 
@@ -460,15 +611,19 @@ export default function TimelinePage() {
         Boolean(todo.sharedWithUserId) &&
         Boolean(todo.dueAt) &&
         !todo.completed &&
-        new Date(todo.dueAt as string).getTime() <= nowMs,
+        (getMeetingStartAtMs(todo) ?? Number.MAX_SAFE_INTEGER) <= nowMs,
     );
   }, [nowMs, sortedTodos]);
 
   const closestTodo = useMemo(() => {
-    const upcoming = sortedTodos.find(
-      (todo) =>
-        !todo.completed && new Date(todo.dueAt as string).getTime() >= nowMs,
-    );
+    const upcoming = sortedTodos.find((todo) => {
+      if (todo.completed) {
+        return false;
+      }
+
+      const startAtMs = getMeetingStartAtMs(todo);
+      return (startAtMs ?? Number.MAX_SAFE_INTEGER) >= nowMs;
+    });
     if (upcoming) {
       return upcoming;
     }
@@ -489,6 +644,7 @@ export default function TimelinePage() {
 
   useEffect(() => {
     if (!currentUserId || activeTodoId || !autoCallTodo) return;
+    if (Date.now() < suppressAutoStartUntilRef.current) return;
     startOrJoinCall(autoCallTodo);
   }, [autoCallTodo, activeTodoId, currentUserId, startOrJoinCall]);
 
@@ -630,22 +786,48 @@ export default function TimelinePage() {
   }, [activeTodoId, activeCallSession, pushDebugMessage]);
 
   useEffect(() => {
+    if (!activeTodoId || !activeCallSession) {
+      stopAudioMonitoring("local");
+      stopAudioMonitoring("remote");
+      return;
+    }
+
+    if (localStreamRef.current) {
+      startAudioMonitoring(localStreamRef.current, "local");
+    }
+
+    if (remoteStreamRef.current) {
+      startAudioMonitoring(remoteStreamRef.current, "remote");
+    }
+  }, [
+    activeCallSession,
+    activeTodoId,
+    startAudioMonitoring,
+    stopAudioMonitoring,
+  ]);
+
+  useEffect(() => {
     return () => {
+      stopAudioMonitoring("local");
+      stopAudioMonitoring("remote");
       releaseMediaResources();
     };
-  }, [releaseMediaResources]);
+  }, [releaseMediaResources, stopAudioMonitoring]);
 
   const endAsDone = async () => {
     if (!activeTodoId || !isCurrentUserB) return;
     try {
       setIsEndingCall(true);
       setError(null);
+      setNotice(null);
       await endCallBySharedUser({ todoId: activeTodoId, markDone: true });
+      suppressAutoStartUntilRef.current = Date.now() + 5000;
       releaseMediaResources();
       setActiveTodoId(null);
       setActiveCallSession(null);
       setCallRole(null);
       await load();
+      setNotice("Todo marked as done.");
     } catch (endError) {
       setError((endError as Error).message);
     } finally {
@@ -658,16 +840,19 @@ export default function TimelinePage() {
     try {
       setIsEndingCall(true);
       setError(null);
+      setNotice(null);
       await endCallBySharedUser({
         todoId: activeTodoId,
         markDone: false,
         rescheduleDueAt: localDateTimeInputToIso(rescheduleInput) ?? undefined,
       });
+      suppressAutoStartUntilRef.current = Date.now() + 5000;
       releaseMediaResources();
       setActiveTodoId(null);
       setActiveCallSession(null);
       setCallRole(null);
       await load();
+      setNotice("Todo has been rescheduled.");
     } catch (endError) {
       setError((endError as Error).message);
     } finally {
@@ -676,11 +861,12 @@ export default function TimelinePage() {
   };
 
   const canStartCallForTodo = (todo: TimelineTodo) => {
+    const startAtMs = getMeetingStartAtMs(todo);
     return Boolean(
       todo.sharedWithUserId &&
-      todo.dueAt &&
+      startAtMs !== null &&
       !todo.completed &&
-      new Date(todo.dueAt).getTime() <= nowMs,
+      startAtMs <= nowMs,
     );
   };
 
@@ -734,6 +920,12 @@ export default function TimelinePage() {
         <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
       )}
 
+      {notice && (
+        <p className="text-sm text-emerald-700 dark:text-emerald-300">
+          {notice}
+        </p>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 space-y-4 min-h-[28rem]">
           <h2 className="text-lg font-semibold">Todo List View</h2>
@@ -754,27 +946,26 @@ export default function TimelinePage() {
                     key={todo.id}
                     todo={todo}
                     isOwnedByCurrentUser={todo.ownerId === currentUserId}
+                    className={
+                      isActiveCallTodo
+                        ? "bg-emerald-50/60 border-emerald-400 dark:bg-emerald-950/20 dark:border-emerald-700"
+                        : undefined
+                    }
                     onDelete={(targetTodo) => {
                       void removeTodo(targetTodo);
                     }}
                     onToggleComplete={(targetTodo) => {
                       void toggleCompleted(targetTodo);
                     }}
-                    dueText={`Due: ${new Date(todo.dueAt as string).toLocaleString()}`}
                     extraInfo={
                       isClosestTodo ? (
                         <p className="text-xs text-amber-600 dark:text-amber-300 font-medium">
-                          Starts in{" "}
+                          Next Meeting Starts in{" "}
                           {formatCountdown(
-                            new Date(todo.dueAt as string).getTime() - nowMs,
+                            (getMeetingStartAtMs(todo) ?? nowMs) - nowMs,
                           )}
                         </p>
                       ) : null
-                    }
-                    metaText={
-                      todo.source === "mine"
-                        ? "My Todos"
-                        : `Shared by ${todo.ownerId}`
                     }
                     footerAction={
                       todo.sharedWithUserId ? (
@@ -785,14 +976,16 @@ export default function TimelinePage() {
                           className={`w-full px-3 py-2 rounded-md text-sm ${
                             isActiveCallTodo
                               ? "bg-emerald-600 text-white"
-                              : "bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-400"
+                              : dueReached
+                                ? "bg-blue-600 hover:bg-blue-700 text-white"
+                                : "bg-transparent border border-zinc-300 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400"
                           }`}
                         >
                           {isActiveCallTodo
                             ? "Call Active"
                             : dueReached
                               ? "Start / Join Call"
-                              : "Call starts when due time is reached"}
+                              : "Call starts at configured pre-meeting time"}
                         </button>
                       ) : null
                     }
@@ -814,8 +1007,23 @@ export default function TimelinePage() {
             <>
               <div className="grid grid-cols-1 gap-3">
                 <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-black/90 overflow-hidden">
-                  <div className="px-3 py-2 text-xs text-zinc-200 bg-zinc-900/80 border-b border-zinc-700">
-                    Remote: {remoteUserId ?? "Unknown"}
+                  <div className="px-3 py-2 text-xs text-zinc-200 bg-zinc-900/80 border-b border-zinc-700 flex items-center justify-between gap-2">
+                    <span>Remote: {remoteUserId ?? "Unknown"}</span>
+                    <div className="flex items-center gap-2 min-w-28">
+                      {isRemoteMuted ? (
+                        <VolumeX size={14} className="text-zinc-300" />
+                      ) : (
+                        <Volume2 size={14} className="text-zinc-300" />
+                      )}
+                      <div className="h-1.5 w-16 rounded-full bg-zinc-700 overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-400 transition-[width] duration-150"
+                          style={{
+                            width: `${Math.round(remoteVolumeLevel * 100)}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
                   <video
                     ref={remoteVideoRef}
@@ -826,8 +1034,23 @@ export default function TimelinePage() {
                 </div>
 
                 <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-black/90 overflow-hidden">
-                  <div className="px-3 py-2 text-xs text-zinc-200 bg-zinc-900/80 border-b border-zinc-700">
-                    You: {currentUserId ?? "Unknown"}
+                  <div className="px-3 py-2 text-xs text-zinc-200 bg-zinc-900/80 border-b border-zinc-700 flex items-center justify-between gap-2">
+                    <span>You: {currentUserId ?? "Unknown"}</span>
+                    <div className="flex items-center gap-2 min-w-28">
+                      {isMicMuted ? (
+                        <VolumeX size={14} className="text-zinc-300" />
+                      ) : (
+                        <Volume2 size={14} className="text-zinc-300" />
+                      )}
+                      <div className="h-1.5 w-16 rounded-full bg-zinc-700 overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-400 transition-[width] duration-150"
+                          style={{
+                            width: `${Math.round(localVolumeLevel * 100)}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
                   <video
                     ref={localVideoRef}
@@ -845,12 +1068,8 @@ export default function TimelinePage() {
                 className="w-full px-3 py-2 rounded-md bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-sm inline-flex items-center justify-center gap-2"
               >
                 {isMicMuted ? <MicOff size={16} /> : <Mic size={16} />}
-                {isMicMuted ? "Unmute Microphone" : "Mute Microphone"}
+                {isMicMuted ? "Unmute My Microphone" : "Mute My Microphone"}
               </button>
-
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Role: {callRole === "A" ? "Owner" : "Shared user"}
-              </p>
 
               <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3">
                 <button
@@ -874,8 +1093,9 @@ export default function TimelinePage() {
                 {isDebugExpanded ? (
                   <>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 mt-2 mb-2">
-                      Peer: {connectionState}, ICE: {iceConnectionState},
-                      Signaling: {signalingState}
+                      Role: {callRole === "A" ? "Owner" : "Shared user"}, Peer:{" "}
+                      {connectionState}, ICE: {iceConnectionState}, Signaling:{" "}
+                      {signalingState}
                     </p>
                     <div className="max-h-36 overflow-y-auto space-y-1 text-xs text-zinc-500 dark:text-zinc-400 font-mono">
                       {debugMessages.length === 0 ? (
@@ -925,8 +1145,8 @@ export default function TimelinePage() {
                 </div>
               ) : (
                 <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                  Waiting for your friend to stop the call and decide
-                  done/reschedule.
+                  Your friend is the one who can stop the call and mark todo as
+                  done or reschedule.
                 </p>
               )}
             </>

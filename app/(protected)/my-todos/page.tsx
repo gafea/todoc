@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { X } from "lucide-react";
 import { TodoCard } from "@/components/todo-card";
 import {
@@ -41,6 +40,7 @@ type TodoDialogState = {
   description: string;
   shouldSetDateTime: boolean;
   dueAtInput: string;
+  startMeetingBeforeMin: number;
   sharedWithUserId: string;
 };
 
@@ -51,13 +51,11 @@ const initialDialogState = (): TodoDialogState => ({
   description: "",
   shouldSetDateTime: true,
   dueAtInput: getNowDateTimeLocal(),
+  startMeetingBeforeMin: 0,
   sharedWithUserId: "",
 });
 
 export default function MyTodosPage() {
-  const pathname = usePathname();
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
@@ -95,6 +93,7 @@ export default function MyTodosPage() {
 
   const sortedTodos = useMemo(() => sortTodos(todos), [todos]);
   const minDateTime = getNowDateTimeLocal();
+  const isDialogShared = dialogState.sharedWithUserId.trim().length > 0;
 
   const openEditDialog = (todo: TodoItem) => {
     setDialogState({
@@ -104,6 +103,7 @@ export default function MyTodosPage() {
       description: todo.description,
       shouldSetDateTime: Boolean(todo.dueAt),
       dueAtInput: toLocalDateTimeInput(todo.dueAt),
+      startMeetingBeforeMin: todo.startMeetingBeforeMin ?? 0,
       sharedWithUserId: todo.sharedWithUserId ?? "",
     });
     setDialogOpen(true);
@@ -114,16 +114,6 @@ export default function MyTodosPage() {
     setDialogState(initialDialogState());
   };
 
-  useEffect(() => {
-    if (searchParams.get("new") !== "1") {
-      return;
-    }
-
-    setDialogState(initialDialogState());
-    setDialogOpen(true);
-    router.replace(pathname);
-  }, [pathname, router, searchParams]);
-
   const saveDialog = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!dialogState.text.trim()) return;
@@ -131,6 +121,14 @@ export default function MyTodosPage() {
     const selectedDueAt = dialogState.shouldSetDateTime
       ? localDateTimeInputToIso(dialogState.dueAtInput)
       : null;
+    const selectedStartMeetingBeforeMin = dialogState.shouldSetDateTime
+      ? dialogState.startMeetingBeforeMin
+      : 0;
+
+    if (dialogState.sharedWithUserId.trim() && !selectedDueAt) {
+      setError("Due date & time is required for shared todos");
+      return;
+    }
 
     try {
       setIsMutating(true);
@@ -141,6 +139,7 @@ export default function MyTodosPage() {
           text: dialogState.text.trim(),
           description: dialogState.description.trim(),
           dueAt: selectedDueAt,
+          startMeetingBeforeMin: selectedStartMeetingBeforeMin,
           sharedWithUserId: dialogState.sharedWithUserId.trim() || null,
         });
       } else if (dialogState.todoId) {
@@ -148,6 +147,7 @@ export default function MyTodosPage() {
           text: dialogState.text.trim(),
           description: dialogState.description.trim(),
           dueAt: selectedDueAt,
+          startMeetingBeforeMin: selectedStartMeetingBeforeMin,
           sharedWithUserId: dialogState.sharedWithUserId.trim() || null,
         });
       }
@@ -212,12 +212,6 @@ export default function MyTodosPage() {
               onToggleComplete={(targetTodo) => {
                 void toggleCompleted(targetTodo);
               }}
-              dueText={
-                todo.dueAt
-                  ? `Due: ${new Date(todo.dueAt).toLocaleString()}`
-                  : undefined
-              }
-              metaText={`Shared with: ${todo.sharedWithUserId || "No one"}`}
               className={
                 todo.completed ? "bg-zinc-100 dark:bg-zinc-900" : undefined
               }
@@ -273,10 +267,17 @@ export default function MyTodosPage() {
                 type="text"
                 value={dialogState.sharedWithUserId}
                 onChange={(e) =>
-                  setDialogState((current) => ({
-                    ...current,
-                    sharedWithUserId: e.target.value,
-                  }))
+                  setDialogState((current) => {
+                    const nextSharedWithUserId = e.target.value;
+                    return {
+                      ...current,
+                      sharedWithUserId: nextSharedWithUserId,
+                      shouldSetDateTime:
+                        nextSharedWithUserId.trim().length > 0
+                          ? true
+                          : current.shouldSetDateTime,
+                    };
+                  })
                 }
                 placeholder="Share with user UUID (optional)"
                 className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent"
@@ -286,13 +287,14 @@ export default function MyTodosPage() {
                 <span>Set date & time</span>
                 <button
                   type="button"
+                  disabled={isDialogShared}
                   onClick={() =>
                     setDialogState((current) => ({
                       ...current,
                       shouldSetDateTime: !current.shouldSetDateTime,
                     }))
                   }
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-60 ${
                     dialogState.shouldSetDateTime
                       ? "bg-blue-600"
                       : "bg-zinc-300 dark:bg-zinc-700"
@@ -309,18 +311,46 @@ export default function MyTodosPage() {
               </label>
 
               {dialogState.shouldSetDateTime && (
-                <input
-                  type="datetime-local"
-                  min={minDateTime}
-                  value={dialogState.dueAtInput}
-                  onChange={(e) =>
-                    setDialogState((current) => ({
-                      ...current,
-                      dueAtInput: e.target.value,
-                    }))
-                  }
-                  className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent"
-                />
+                <>
+                  <input
+                    type="datetime-local"
+                    min={minDateTime}
+                    value={dialogState.dueAtInput}
+                    onChange={(e) =>
+                      setDialogState((current) => ({
+                        ...current,
+                        dueAtInput: e.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent"
+                  />
+
+                  {isDialogShared ? (
+                    <label className="flex items-center justify-between text-sm text-zinc-600 dark:text-zinc-300 gap-3">
+                      <span>Start meeting before</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={0}
+                          max={1440}
+                          value={dialogState.startMeetingBeforeMin}
+                          onChange={(e) => {
+                            const parsed = Number(e.target.value);
+                            setDialogState((current) => ({
+                              ...current,
+                              startMeetingBeforeMin:
+                                Number.isFinite(parsed) && parsed >= 0
+                                  ? Math.min(1440, Math.floor(parsed))
+                                  : 0,
+                            }));
+                          }}
+                          className="w-28 px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent"
+                        />
+                        <span>min</span>
+                      </div>
+                    </label>
+                  ) : null}
+                </>
               )}
 
               <div className="flex justify-end gap-2 pt-2">
