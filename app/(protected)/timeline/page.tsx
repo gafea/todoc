@@ -266,7 +266,9 @@ export default function TimelinePage() {
         }
 
         try {
-          await connection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          await connection.addIceCandidate(
+            new RTCIceCandidate(payload.candidate),
+          );
         } catch (candidateError) {
           pendingIceCandidatesRef.current.push(payload.candidate);
           pushDebugMessage(
@@ -504,7 +506,8 @@ export default function TimelinePage() {
         const orderedSignals = [...callData.signals].sort((first, second) => {
           const firstType = (first.payload as { type?: string })?.type;
           const secondType = (second.payload as { type?: string })?.type;
-          const firstPriority = firstType === "offer" || firstType === "answer" ? 0 : 1;
+          const firstPriority =
+            firstType === "offer" || firstType === "answer" ? 0 : 1;
           const secondPriority =
             secondType === "offer" || secondType === "answer" ? 0 : 1;
           return firstPriority - secondPriority;

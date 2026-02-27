@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "prisma generate && prisma migrate deploy && next dev",
+    "dev": "prisma generate && prisma migrate deploy && node scripts/run.mjs dev",
     "build": "prisma generate && prisma migrate deploy && next build",
-    "start": "next start",
+    "start": "node scripts/run.mjs start",
     "lint": "eslint",
     "prettier": "prettier --write .",
     "prettier:check": "prettier --check .",
