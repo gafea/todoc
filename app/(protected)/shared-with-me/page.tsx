@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Trash } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { TodoCard } from "@/components/todo-card";
 import {
   createShareBan,
   fetchShareBans,
@@ -33,7 +33,7 @@ export default function SharedWithMePage() {
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadTodos = async () => {
+  const loadTodos = useCallback(async () => {
     try {
       setError(null);
       const [payload, bansPayload] = await Promise.all([
@@ -47,11 +47,22 @@ export default function SharedWithMePage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadTodos();
-  }, []);
+  }, [loadTodos]);
+
+  useEffect(() => {
+    const handleTodoCreated = () => {
+      void loadTodos();
+    };
+
+    window.addEventListener("todo:created", handleTodoCreated);
+    return () => {
+      window.removeEventListener("todo:created", handleTodoCreated);
+    };
+  }, [loadTodos]);
 
   const removeFromShared = async (id: string) => {
     try {
@@ -184,41 +195,27 @@ export default function SharedWithMePage() {
 
                   <div className="space-y-3">
                     {ownerTodos.map((todo) => (
-                      <article
+                      <TodoCard
                         key={todo.id}
-                        className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <h3 className="font-medium break-words">
-                            {todo.text}
-                          </h3>
+                        todo={todo}
+                        isOwnedByCurrentUser={false}
+                        isMutating={isMutating}
+                        dueText={
+                          todo.dueAt
+                            ? `Due: ${new Date(todo.dueAt).toLocaleString()}`
+                            : "Due: Not set"
+                        }
+                        footerAction={
                           <button
                             type="button"
                             disabled={isMutating}
                             onClick={() => removeFromShared(todo.id)}
-                            className="px-2 py-1 rounded-md text-xs bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white inline-flex items-center gap-1"
+                            className="w-full px-3 py-2 rounded-md text-sm bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white"
                           >
-                            <Trash size={12} />
                             Remove
                           </button>
-                        </div>
-
-                        {todo.description && (
-                          <p className="text-sm text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap break-words">
-                            {todo.description}
-                          </p>
-                        )}
-
-                        {todo.dueAt ? (
-                          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                            Due: {new Date(todo.dueAt).toLocaleString()}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                            Due: Not set
-                          </p>
-                        )}
-                      </article>
+                        }
+                      />
                     ))}
                   </div>
                 </section>

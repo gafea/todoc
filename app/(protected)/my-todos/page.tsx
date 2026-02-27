@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { X } from "lucide-react";
+import { TodoCard } from "@/components/todo-card";
 import {
   createTodo,
   deleteTodo,
@@ -53,6 +55,9 @@ const initialDialogState = (): TodoDialogState => ({
 });
 
 export default function MyTodosPage() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
@@ -61,7 +66,7 @@ export default function MyTodosPage() {
   const [dialogState, setDialogState] =
     useState<TodoDialogState>(initialDialogState());
 
-  const loadTodos = async () => {
+  const loadTodos = useCallback(async () => {
     try {
       setError(null);
       const data = await fetchTodos();
@@ -71,19 +76,25 @@ export default function MyTodosPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadTodos();
-  }, []);
+  }, [loadTodos]);
+
+  useEffect(() => {
+    const handleTodoCreated = () => {
+      void loadTodos();
+    };
+
+    window.addEventListener("todo:created", handleTodoCreated);
+    return () => {
+      window.removeEventListener("todo:created", handleTodoCreated);
+    };
+  }, [loadTodos]);
 
   const sortedTodos = useMemo(() => sortTodos(todos), [todos]);
   const minDateTime = getNowDateTimeLocal();
-
-  const openCreateDialog = () => {
-    setDialogState(initialDialogState());
-    setDialogOpen(true);
-  };
 
   const openEditDialog = (todo: TodoItem) => {
     setDialogState({
@@ -102,6 +113,16 @@ export default function MyTodosPage() {
     setDialogOpen(false);
     setDialogState(initialDialogState());
   };
+
+  useEffect(() => {
+    if (searchParams.get("new") !== "1") {
+      return;
+    }
+
+    setDialogState(initialDialogState());
+    setDialogOpen(true);
+    router.replace(pathname);
+  }, [pathname, router, searchParams]);
 
   const saveDialog = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -168,17 +189,7 @@ export default function MyTodosPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">My Todos</h1>
-        <button
-          type="button"
-          onClick={openCreateDialog}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg inline-flex items-center gap-2"
-        >
-          <Plus size={16} />
-          New Todo
-        </button>
-      </div>
+      <h1 className="text-2xl font-bold">My Todos</h1>
 
       {error && (
         <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
@@ -189,73 +200,28 @@ export default function MyTodosPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {sortedTodos.map((todo) => (
-            <div
+            <TodoCard
               key={todo.id}
-              className={`rounded-xl border p-4 space-y-3 ${
-                todo.completed
-                  ? "bg-zinc-100 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800"
-                  : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700"
-              }`}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <h2
-                  className={`font-semibold break-words ${
-                    todo.completed ? "line-through text-zinc-500" : ""
-                  }`}
-                >
-                  {todo.text}
-                </h2>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => openEditDialog(todo)}
-                    className="p-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                    aria-label="Edit todo"
-                  >
-                    <Pencil size={16} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeTodo(todo.id)}
-                    disabled={isMutating}
-                    className="p-2 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 text-red-500"
-                    aria-label="Delete todo"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </div>
-
-              {todo.description && (
-                <p className="text-sm text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap break-words">
-                  {todo.description}
-                </p>
-              )}
-
-              {todo.dueAt && (
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Due: {new Date(todo.dueAt).toLocaleString()}
-                </p>
-              )}
-
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Shared with: {todo.sharedWithUserId || "No one"}
-              </p>
-
-              <button
-                type="button"
-                onClick={() => toggleCompleted(todo)}
-                disabled={isMutating}
-                className={`w-full px-3 py-2 rounded-md text-sm inline-flex items-center justify-center gap-2 ${
-                  todo.completed
-                    ? "bg-zinc-200 dark:bg-zinc-800"
-                    : "bg-green-600 hover:bg-green-700 text-white"
-                }`}
-              >
-                <Check size={14} />
-                {todo.completed ? "Completed" : "Mark Complete"}
-              </button>
-            </div>
+              todo={todo}
+              isOwnedByCurrentUser
+              isMutating={isMutating}
+              onEdit={openEditDialog}
+              onDelete={(targetTodo) => {
+                void removeTodo(targetTodo.id);
+              }}
+              onToggleComplete={(targetTodo) => {
+                void toggleCompleted(targetTodo);
+              }}
+              dueText={
+                todo.dueAt
+                  ? `Due: ${new Date(todo.dueAt).toLocaleString()}`
+                  : undefined
+              }
+              metaText={`Shared with: ${todo.sharedWithUserId || "No one"}`}
+              className={
+                todo.completed ? "bg-zinc-100 dark:bg-zinc-900" : undefined
+              }
+            />
           ))}
         </div>
       )}

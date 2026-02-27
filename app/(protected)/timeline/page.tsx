@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, Mic, MicOff } from "lucide-react";
+import { TodoCard } from "@/components/todo-card";
 import {
   CallApiError,
   endCallBySharedUser,
@@ -10,9 +12,11 @@ import {
   type CallSessionPayload,
 } from "@/lib/call-client";
 import {
+  deleteTodo,
   fetchTodos,
   localDateTimeInputToIso,
   TodoItem,
+  updateTodo,
 } from "@/lib/todo-client";
 
 type TimelineTodo = TodoItem & {
@@ -65,6 +69,8 @@ export default function TimelinePage() {
   const [rescheduleInput, setRescheduleInput] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [debugMessages, setDebugMessages] = useState<string[]>([]);
+  const [isDebugExpanded, setIsDebugExpanded] = useState(false);
+  const [isMicMuted, setIsMicMuted] = useState(false);
   const [iceConnectionState, setIceConnectionState] =
     useState<RTCIceConnectionState>("new");
   const [signalingState, setSignalingState] =
@@ -124,6 +130,7 @@ export default function TimelinePage() {
     setIceConnectionState("new");
     setSignalingState("stable");
     setConnectionState("new");
+    setIsMicMuted(false);
   }, [pushDebugMessage]);
 
   const load = useCallback(async () => {
@@ -151,7 +158,7 @@ export default function TimelinePage() {
           source: "shared" as const,
         })),
       ]
-        .filter((todo) => Boolean(todo.dueAt))
+        .filter((todo) => Boolean(todo.dueAt) && !todo.completed)
         .sort(
           (first, second) =>
             new Date(first.dueAt as string).getTime() -
@@ -188,6 +195,17 @@ export default function TimelinePage() {
 
     return () => {
       window.clearInterval(intervalId);
+    };
+  }, [load]);
+
+  useEffect(() => {
+    const handleTodoCreated = () => {
+      void load();
+    };
+
+    window.addEventListener("todo:created", handleTodoCreated);
+    return () => {
+      window.removeEventListener("todo:created", handleTodoCreated);
     };
   }, [load]);
 
@@ -305,6 +323,9 @@ export default function TimelinePage() {
         video: true,
         audio: true,
       });
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = !isMicMuted;
+      });
       pushDebugMessage("Local media stream acquired");
 
       const connection = new RTCPeerConnection({
@@ -378,7 +399,7 @@ export default function TimelinePage() {
         pushDebugMessage("Sent offer signal");
       }
     },
-    [currentUserId, pushDebugMessage, releaseMediaResources],
+    [currentUserId, isMicMuted, pushDebugMessage, releaseMediaResources],
   );
 
   const startOrJoinCall = useCallback(
@@ -561,6 +582,16 @@ export default function TimelinePage() {
   }, [activeTodoId, handleSignal, pushDebugMessage, releaseMediaResources]);
 
   useEffect(() => {
+    if (!localStreamRef.current) {
+      return;
+    }
+
+    localStreamRef.current.getAudioTracks().forEach((track) => {
+      track.enabled = !isMicMuted;
+    });
+  }, [isMicMuted]);
+
+  useEffect(() => {
     if (localVideoRef.current && localStreamRef.current) {
       if (localVideoRef.current.srcObject !== localStreamRef.current) {
         localVideoRef.current.srcObject = localStreamRef.current;
@@ -671,6 +702,30 @@ export default function TimelinePage() {
     return activeCallSession.initiatorUserId;
   }, [activeCallSession, currentUserId]);
 
+  const toggleMute = () => {
+    setIsMicMuted((current) => !current);
+  };
+
+  const toggleCompleted = async (todo: TodoItem) => {
+    try {
+      setError(null);
+      await updateTodo(todo.id, { completed: !todo.completed });
+      await load();
+    } catch (toggleError) {
+      setError((toggleError as Error).message);
+    }
+  };
+
+  const removeTodo = async (todo: TodoItem) => {
+    try {
+      setError(null);
+      await deleteTodo(todo.id);
+      await load();
+    } catch (deleteError) {
+      setError((deleteError as Error).message);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Timeline</h1>
@@ -695,71 +750,53 @@ export default function TimelinePage() {
                 const isClosestTodo = closestTodo?.id === todo.id;
 
                 return (
-                  <article
+                  <TodoCard
                     key={todo.id}
-                    className={`rounded-md border p-3 ${
+                    todo={todo}
+                    isOwnedByCurrentUser={todo.ownerId === currentUserId}
+                    onDelete={(targetTodo) => {
+                      void removeTodo(targetTodo);
+                    }}
+                    onToggleComplete={(targetTodo) => {
+                      void toggleCompleted(targetTodo);
+                    }}
+                    dueText={`Due: ${new Date(todo.dueAt as string).toLocaleString()}`}
+                    extraInfo={
+                      isClosestTodo ? (
+                        <p className="text-xs text-amber-600 dark:text-amber-300 font-medium">
+                          Starts in{" "}
+                          {formatCountdown(
+                            new Date(todo.dueAt as string).getTime() - nowMs,
+                          )}
+                        </p>
+                      ) : null
+                    }
+                    metaText={
                       todo.source === "mine"
-                        ? "border-blue-300 dark:border-blue-700 bg-blue-50/60 dark:bg-blue-950/20"
-                        : "border-emerald-300 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-950/20"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-medium break-words">{todo.text}</p>
-                      <span
-                        className={`text-[11px] px-2 py-1 rounded-full ${
-                          todo.source === "mine"
-                            ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200"
-                            : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200"
-                        }`}
-                      >
-                        {todo.source === "mine" ? "Mine" : "Shared with me"}
-                      </span>
-                    </div>
-
-                    {todo.description && (
-                      <p className="text-sm text-zinc-600 dark:text-zinc-300 mt-1 break-words">
-                        {todo.description}
-                      </p>
-                    )}
-
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2">
-                      Due: {new Date(todo.dueAt as string).toLocaleString()}
-                    </p>
-
-                    {isClosestTodo ? (
-                      <p className="text-xs text-amber-600 dark:text-amber-300 mt-1 font-medium">
-                        Starts in{" "}
-                        {formatCountdown(
-                          new Date(todo.dueAt as string).getTime() - nowMs,
-                        )}
-                      </p>
-                    ) : null}
-
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                      {todo.source === "mine"
                         ? "My Todos"
-                        : `Shared by ${todo.ownerId}`}
-                    </p>
-
-                    {todo.sharedWithUserId ? (
-                      <button
-                        type="button"
-                        disabled={!dueReached || isPreparingCall}
-                        onClick={() => startOrJoinCall(todo)}
-                        className={`mt-2 w-full px-3 py-2 rounded-md text-sm ${
-                          isActiveCallTodo
-                            ? "bg-emerald-600 text-white"
-                            : "bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-400"
-                        }`}
-                      >
-                        {isActiveCallTodo
-                          ? "Call Active"
-                          : dueReached
-                            ? "Start / Join Call"
-                            : "Call starts when due time is reached"}
-                      </button>
-                    ) : null}
-                  </article>
+                        : `Shared by ${todo.ownerId}`
+                    }
+                    footerAction={
+                      todo.sharedWithUserId ? (
+                        <button
+                          type="button"
+                          disabled={!dueReached || isPreparingCall}
+                          onClick={() => startOrJoinCall(todo)}
+                          className={`w-full px-3 py-2 rounded-md text-sm ${
+                            isActiveCallTodo
+                              ? "bg-emerald-600 text-white"
+                              : "bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-400"
+                          }`}
+                        >
+                          {isActiveCallTodo
+                            ? "Call Active"
+                            : dueReached
+                              ? "Start / Join Call"
+                              : "Call starts when due time is reached"}
+                        </button>
+                      ) : null
+                    }
+                  />
                 );
               })}
             </div>
@@ -802,33 +839,58 @@ export default function TimelinePage() {
                 </div>
               </div>
 
-              <div className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1">
-                <p>Todo: {activeTodo.text}</p>
-                <p>Role: {callRole === "A" ? "Owner" : "Shared user"}</p>
-                <p>
-                  Call state:{" "}
-                  {isPreparingCall ? "Preparing..." : activeCallSession.status}
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={toggleMute}
+                className="w-full px-3 py-2 rounded-md bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-sm inline-flex items-center justify-center gap-2"
+              >
+                {isMicMuted ? <MicOff size={16} /> : <Mic size={16} />}
+                {isMicMuted ? "Unmute Microphone" : "Mute Microphone"}
+              </button>
+
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Role: {callRole === "A" ? "Owner" : "Shared user"}
+              </p>
 
               <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3">
-                <p className="text-sm font-medium mb-2">WebRTC Debug</p>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 mb-2">
-                  Peer: {connectionState}, ICE: {iceConnectionState}, Signaling:{" "}
-                  {signalingState}
-                </p>
-                <div className="max-h-36 overflow-y-auto space-y-1 text-xs text-zinc-500 dark:text-zinc-400 font-mono">
-                  {debugMessages.length === 0 ? (
-                    <p>No debug events yet.</p>
+                <button
+                  type="button"
+                  onClick={() => setIsDebugExpanded((current) => !current)}
+                  className="w-full text-left inline-flex items-center justify-between text-sm font-medium"
+                >
+                  <span>
+                    Call state:{" "}
+                    {isPreparingCall
+                      ? "Preparing..."
+                      : activeCallSession.status}
+                  </span>
+                  {isDebugExpanded ? (
+                    <ChevronUp size={16} />
                   ) : (
-                    debugMessages
-                      .slice()
-                      .reverse()
-                      .map((message, index) => (
-                        <p key={`${message}-${index}`}>{message}</p>
-                      ))
+                    <ChevronDown size={16} />
                   )}
-                </div>
+                </button>
+
+                {isDebugExpanded ? (
+                  <>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 mt-2 mb-2">
+                      Peer: {connectionState}, ICE: {iceConnectionState},
+                      Signaling: {signalingState}
+                    </p>
+                    <div className="max-h-36 overflow-y-auto space-y-1 text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                      {debugMessages.length === 0 ? (
+                        <p>No debug events yet.</p>
+                      ) : (
+                        debugMessages
+                          .slice()
+                          .reverse()
+                          .map((message, index) => (
+                            <p key={`${message}-${index}`}>{message}</p>
+                          ))
+                      )}
+                    </div>
+                  </>
+                ) : null}
               </div>
 
               {isCurrentUserB ? (
@@ -842,7 +904,7 @@ export default function TimelinePage() {
                     disabled={isEndingCall}
                     className="w-full px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-sm"
                   >
-                    Stop Call & Mark as Done
+                    End Call & Mark as Done
                   </button>
 
                   <input
@@ -858,7 +920,7 @@ export default function TimelinePage() {
                     disabled={isEndingCall || !rescheduleInput}
                     className="w-full px-3 py-2 rounded-md bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white text-sm"
                   >
-                    Stop Call & Reschedule Due Date
+                    End Call & Reschedule Due Date
                   </button>
                 </div>
               ) : (
